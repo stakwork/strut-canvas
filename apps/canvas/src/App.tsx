@@ -203,6 +203,7 @@ function Board({ onAuthors }: { onAuthors: (dir: Record<string, string>) => void
       const a = f.getBoundingClientRect();
       const y1 = Math.max((edge?.top ?? a.top) + 14, Math.min((edge?.bottom ?? a.bottom) - 14, a.top + Math.min(a.height / 2, 22))) - o.top;
       const x1 = (edge?.right ?? a.right) - o.left + 2;
+      const drawn = nodes.length;
       for (const t of to) {
         const r = t.getBoundingClientRect();
         if (r.right < x1 + o.left || r.left > o.right || r.bottom < o.top || r.top > o.bottom) continue;
@@ -213,6 +214,8 @@ function Board({ onAuthors }: { onAuthors: (dir: Record<string, string>) => void
         p.setAttribute("d", `M${x1},${y1} C${m},${y1} ${m},${y2} ${x2},${y2}`);
         nodes.push(p);
       }
+      // A thread's knot at the sheet's edge, only where a thread leaves it.
+      if (nodes.length === drawn) continue;
       const c = document.createElementNS("http://www.w3.org/2000/svg", "circle");
       c.setAttribute("cx", String(x1));
       c.setAttribute("cy", String(y1));
@@ -1291,7 +1294,7 @@ function Board({ onAuthors }: { onAuthors: (dir: Record<string, string>) => void
             </div>
           );
         })()}
-      {data?.truncated && <div className="sb-cut">This graph holds more than the canvas reads at once. Some cards are missing.</div>}
+      {data?.truncated && <div className="sb-cut">Too many cards to show them all.</div>}
     </div>
   );
 }

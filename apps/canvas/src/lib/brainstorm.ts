@@ -127,9 +127,12 @@ export function buildBrainstorms(questions: RawNode[], options: RawNode[], edges
     if (!isLive(p) || choices[n.ref_id]) continue;
     const s = p["state"];
     const fast = score(p["fast"]), good = score(p["good"]), cheap = score(p["cheap"]);
+    // Brainstorm Method has the agent end a recommended option's text "(recommended)": the card marks it instead.
+    const said = textOf(n);
+    const marked = /\s*\(recommended\)\s*$/i.test(said);
     choices[n.ref_id] = {
       id: n.ref_id,
-      text: textOf(n),
+      text: marked ? said.replace(/\s*\(recommended\)\s*$/i, "") || said : said,
       state: s === "chosen" ? "chosen" : s === "rejected" ? "rejected" : "open",
       by: saidBy(p),
       author: authorOf(p),
@@ -138,7 +141,7 @@ export function buildBrainstorms(questions: RawNode[], options: RawNode[], edges
       label: "",
       ratings: fast === null && good === null && cheap === null ? null : { fast, good, cheap },
       effects: [],
-      recommended: p["recommended"] === true || p["recommended"] === "true",
+      recommended: marked || p["recommended"] === true || p["recommended"] === "true",
     };
     order.set(n.ref_id, stampOf(n));
   }

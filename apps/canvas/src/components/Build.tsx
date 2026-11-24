@@ -162,11 +162,7 @@ export function BuildPanel({ card, work, jobs, links, architecture, loading }: {
       )}
       {preview && (
         <div className="sb-pencil-box" data-testid="ic-implement-confirm">
-          <p>
-            {preview.builds_in === "strut"
-              ? `This starts a builder job, “${preview.title}”, that builds it as workflows or an app on this server.`
-              : `This starts a Code Change job, “${preview.title}”, ${preview.repos.length ? `in ${preview.repos.join(", ")}` : "that finds the repositories to change"}.`}
-          </p>
+          <p>{preview.builds_in === "strut" ? "Starts a builder job on this server." : `Starts a Code Change job${preview.repos.length ? ` in ${preview.repos.map((r) => r.replace(/^https:\/\/(www\.)?github\.com\//, "")).join(", ")}` : ""}.`}</p>
           <button type="button" className="sb-link sb-quiet" disabled={starting} onClick={() => void look(preview.builds_in === "strut" ? "repo" : "strut")}>
             {preview.builds_in === "strut" ? "Change code in a repository instead" : "Build it on this server instead"}
           </button>

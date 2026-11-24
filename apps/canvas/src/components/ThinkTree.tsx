@@ -241,6 +241,7 @@ function OptionNode({ n, style, b, act }: Props & Sty) {
       <span className="bt-row">
         <small className="bt-state">
           {o.state === "chosen" ? "Chosen" : o.state === "rejected" ? "Not chosen" : "Open"}
+          {o.recommended && o.state === "open" && <span className="bt-rec"> · Recommended</span>}
           {o.asks.length > 0 && ` · leads to ${o.asks.length} question${o.asks.length === 1 ? "" : "s"}`}
         </small>
         <Byline author={o.author} className="bt-by" />

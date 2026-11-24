@@ -94,3 +94,9 @@ test("removing a topic takes its sub-questions, their options and follow-ups wit
   for (const gone of ["q1", "o1", "o2", "f", "o5"]) assert.ok(!r.asks[gone] && !r.choices[gone], gone);
   assert.deepEqual(Object.keys(patchBrainstorms(b, { op: "remove", ref_id: "root" })!.asks), []);
 });
+
+test("an option the agent marked (recommended) in its words shows the mark, not the words", () => {
+  const r = buildBrainstorms([node("q", { text: "Which?" })], [node("o", { text: "Send right away (recommended)" })], [{ source: "q", target: "o", edge_type: "PARENT_OF" }], plan);
+  assert.equal(r.choices["o"]!.text, "Send right away");
+  assert.equal(r.choices["o"]!.recommended, true);
+});
