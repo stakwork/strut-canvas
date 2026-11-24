@@ -1,0 +1,46 @@
+description: >-
+  Implement a feature: starts a Code Change job with the feature's brief (its requirements and architecture)
+  and records the job on the feature, so its card shows what the job builds. Refuses a feature with no
+  architecture. dry_run: the brief, and nothing started.
+input:
+  feature: { type: string, description: "The feature's ref_id" }
+  repos: { type: json, default: [], description: "Repository URLs the job works on (optional: the job finds them when empty)" }
+  dry_run: { type: boolean, default: false }
+steps:
+  - id: ctx
+    type: read
+    config:
+      about: "{{ input.feature }}"
+  - id: brief
+    type: implement-brief
+    config:
+      ctx: "{{ ctx }}"
+      feature: "{{ input.feature }}"
+  - id: gate
+    type: if
+    config:
+      cond: "{{ input.dry_run }}"
+  - id: start
+    type: job/start
+    depends: gate
+    when: false
+    config:
+      title: "{{ brief.title }}"
+      prompt: "{{ brief.prompt }}"
+      kind: "Code Change"
+      repos: "{{ input.repos }}"
+  - id: record
+    type: job-started
+    depends: start
+    config:
+      feature: "{{ input.feature }}"
+      job: "{{ start.job }}"
+  - id: result
+    type: pack
+    depends: [gate, record]
+    config:
+      dry_run: "{{ input.dry_run }}"
+      title: "{{ brief.title }}"
+      feature: "{{ brief.feature }}"
+      job: "{{ start?.job }}"
+      text: "{{ input.dry_run ? 'Dry run: nothing started.' : 'Job started: ' + brief.title }}"

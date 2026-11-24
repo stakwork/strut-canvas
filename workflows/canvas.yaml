@@ -1,0 +1,191 @@
+description: >-
+  The canvas's planning tool: the one workflow a Canvas Planning job calls. No model runs in it: the job agent
+  decides, this checks, stamps and writes. Three modes. read: `about` and its initiative (brief, stories and
+  requirements, milestones and features, architecture, brainstorms), and the outline of a brainstorm when `about`
+  is one. write: a typed `plan` (new_initiative, brief, stories, milestones, features, architectures, edits,
+  deletes, moves). brainstorm: `{ actions: [...] }`, adds only, checked before anything is written.
+input:
+  prompt: { type: string, default: "", description: "The person's words, unchanged. A brainstorm's made_by user options quote them verbatim" }
+  job: { type: string, required: false, description: "The job's id" }
+  mode: { type: string, required: false, description: "read | write | brainstorm. Default: brainstorm when `brainstorm` is given, write when `plan` is" }
+  about: { type: string, required: false, description: "The ref_id of the most specific card (initiative, milestone, feature, brief, story, requirement, brainstorm question or option). Left out: the top level, where a new initiative may be created" }
+  plan: { type: json, required: false, description: "write: the typed plan the agent decided (deletes can be restored)" }
+  brainstorm: { type: json, required: false, description: "brainstorm: { actions: [...] }, the draft the agent decided (adds only)" }
+  root: { type: string, required: false, description: "brainstorm: the root question's ref_id, to continue a tree" }
+  created_by_kind: { type: string, default: jamie, description: "jamie | strut" }
+  allow_human: { type: boolean, default: false, description: "Only when the person asked to change or delete their own cards" }
+steps:
+  - id: route
+    type: pack
+    depends: []
+    config:
+      mode: "{{ input.mode || (input.brainstorm ? 'brainstorm' : (input.plan ? 'write' : 'none')) }}"
+  - id: known
+    type: if
+    depends: route
+    config:
+      cond: "{{ route.mode === 'read' || route.mode === 'write' || route.mode === 'brainstorm' }}"
+  - id: refuse
+    type: fail
+    depends: known
+    when: false
+    config:
+      message: "canvas: nothing to do. The job agent decides and passes exactly what to write: `plan` (brief, stories, milestones, features, architectures, edits, deletes, new_initiative) to write, `brainstorm` ({ actions: [...] }) to brainstorm, or mode: read to read a card and its initiative. Nothing was written."
+  - id: st_read
+    type: job/status
+    depends: known
+    when: true
+    config:
+      title: "Reading the canvas"
+  - id: ctx
+    type: read
+    depends: known
+    when: true
+    config:
+      about: "{{ input.root || input.about }}"
+      prompt: "{{ input.prompt }}"
+      job: "{{ input.job }}"
+      root: "{{ input.root }}"
+  - id: before
+    type: tree
+    depends: ctx
+    config:
+      root: "{{ ctx.bs_input.root }}"
+  - id: g_read
+    type: if
+    depends: before
+    config:
+      cond: "{{ route.mode === 'read' }}"
+  - id: g_bs
+    type: if
+    depends: before
+    config:
+      cond: "{{ route.mode === 'brainstorm' }}"
+  - id: g_write
+    type: if
+    depends: before
+    config:
+      cond: "{{ route.mode === 'write' }}"
+  - id: read_out
+    type: pack
+    depends: g_read
+    when: true
+    config:
+      action: read
+      text: "{{ 'Read ' + ctx.about.type + ' \"' + ctx.about.name + '\" (level: ' + ctx.level + ').' }}"
+      level: "{{ ctx.level }}"
+      about: "{{ ctx.about }}"
+      anchor: "{{ ctx.anchor }}"
+      chain: "{{ ctx.chain }}"
+      initiative_ref: "{{ ctx.initiative_ref }}"
+      milestone_ref: "{{ ctx.milestone_ref }}"
+      feature_ref: "{{ ctx.feature_ref }}"
+      initiative: "{{ ctx.initiative }}"
+      requirements: "{{ ctx.requirements }}"
+      brainstorms: "{{ ctx.brainstorms }}"
+      root: "{{ before.root }}"
+      outline: "{{ before.outline }}"
+      next_open: "{{ before.next_open }}"
+  - id: st_bs
+    type: job/status
+    depends: g_bs
+    when: true
+    config:
+      title: "Checking the brainstorm"
+  - id: check
+    type: brainstorm-check
+    depends: g_bs
+    when: true
+    config:
+      draft: "{{ input.brainstorm }}"
+      tree: "{{ before }}"
+      prompt: "{{ input.prompt }}"
+      requirements: "{{ ctx.requirements }}"
+      level: "{{ ctx.level }}"
+  - id: bs_ok
+    type: if
+    depends: check
+    config:
+      cond: "{{ check.ok }}"
+  - id: bs_refuse
+    type: fail
+    depends: bs_ok
+    when: false
+    config:
+      message: "{{ 'canvas: the brainstorm draft was refused and nothing was written. Fix these and send it again: ' + check.problems.join(' | ') }}"
+  - id: st_apply
+    type: job/status
+    depends: bs_ok
+    when: true
+    config:
+      title: "Writing the brainstorm"
+  - id: apply
+    type: brainstorm-write
+    depends: bs_ok
+    when: true
+    config:
+      draft: "{{ input.brainstorm }}"
+      tree: "{{ before }}"
+      root: "{{ ctx.bs_input.root }}"
+      about: "{{ ctx.bs_input.about }}"
+      job: "{{ input.job || $job }}"
+  - id: after
+    type: tree
+    depends: apply
+    config:
+      root: "{{ apply.root }}"
+  - id: bs_result
+    type: pack
+    depends: after
+    config:
+      action: brainstorm
+      text: "{{ 'Brainstorm written: ' + after.count + ' cards in the tree. ' + after.next_open_line }}"
+      root: "{{ after.root }}"
+      outline: "{{ after.outline }}"
+      next_open: "{{ after.next_open }}"
+      written: "{{ apply.written }}"
+  - id: st_write
+    type: job/status
+    depends: g_write
+    when: true
+    config:
+      title: "Writing the plan"
+  - id: guard
+    type: guard
+    depends: g_write
+    when: true
+    config:
+      plan: "{{ input.plan }}"
+      ignore_job: "{{ input.job }}"
+  - id: write
+    type: write
+    depends: guard
+    config:
+      plan: "{{ input.plan }}"
+      context: "{{ ctx }}"
+      job: "{{ input.job }}"
+      created_by_kind: "{{ input.created_by_kind }}"
+      allow_human: "{{ input.allow_human }}"
+  - id: result
+    type: pack
+    depends: [read_out, bs_result, write]
+    config:
+      action: "{{ read_out?.action || bs_result?.action || write?.action }}"
+      text: "{{ read_out?.text || bs_result?.text || write?.text }}"
+      artifacts: "{{ write?.artifacts }}"
+      root: "{{ read_out?.root || bs_result?.root }}"
+      outline: "{{ read_out?.outline || bs_result?.outline }}"
+      next_open: "{{ read_out?.next_open || bs_result?.next_open }}"
+      level: "{{ read_out?.level }}"
+      about: "{{ read_out?.about }}"
+      anchor: "{{ read_out?.anchor }}"
+      initiative: "{{ read_out?.initiative }}"
+      requirements: "{{ read_out?.requirements }}"
+      brainstorms: "{{ read_out?.brainstorms }}"
+      written: "{{ bs_result?.written || write?.written }}"
+      skipped: "{{ write?.skipped }}"
+      touched: "{{ write?.touched }}"
+      next: "{{ write?.next }}"
+      summary: "{{ write?.summary }}"
+      initiative_ref: "{{ read_out?.initiative_ref || write?.initiative_ref }}"
+      notes: "{{ write?.notes }}"

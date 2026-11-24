@@ -1,0 +1,39 @@
+description: >-
+  A person's act on the canvas, with no model: the Infinite Canvas app runs one per change, as the viewer.
+  See the `op` step for each act.
+input:
+  op: { type: string, description: "accept | drop | reset | set_status | edit | remove | restore | add | add_question | add_option | choose | unchoose" }
+  ref_id: { type: string, required: false }
+  field: { type: string, required: false }
+  value: { type: string, required: false, description: "edit: the new value. set_status: planned, active, done, dropped or blocked" }
+  kind: { type: string, required: false, description: "add: initiative | brief | story | requirement | milestone | feature | architecture" }
+  parent: { type: string, required: false, description: "add, add_option, add_question (a follow-up or sub-question): the parent card's ref_id" }
+  about: { type: string, required: false, description: "add_question (a new brainstorm): the card it is about" }
+  text: { type: string, required: false }
+  reason: { type: string, required: false }
+steps:
+  - id: act
+    type: op
+    config:
+      op: "{{ input.op }}"
+      ref_id: "{{ input.ref_id }}"
+      field: "{{ input.field }}"
+      value: "{{ input.value }}"
+      kind: "{{ input.kind }}"
+      parent: "{{ input.parent }}"
+      about: "{{ input.about }}"
+      text: "{{ input.text }}"
+      reason: "{{ input.reason }}"
+  - id: result
+    type: pack
+    config:
+      op: "{{ act.op }}"
+      ref_id: "{{ act.ref_id }}"
+      root: "{{ act.root }}"
+      written: "{{ act.written }}"
+      node_type: "{{ act.node_type }}"
+      removed: "{{ act.removed }}"
+      restored: "{{ act.restored }}"
+      initiative_ref: "{{ act.initiative_ref }}"
+      status: "{{ act.status }}"
+      text: "{{ act.text }}"

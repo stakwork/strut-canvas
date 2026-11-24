@@ -1,0 +1,281 @@
+/**
+ * stadeum/canvas on a strut server, the way it runs on a box: installed from
+ * this directory (`file:`) into a strut started in this process from a
+ * checkout of stakwork/strut's main (`STRUT_DIR`, default `../strut`, with
+ * its install), on a LadybugDB file. Then driven as its users drive it: the
+ * Canvas Planning job through the `canvas` workflow (read, write, brainstorm),
+ * a person through the app's `ops` workflow (choose, remove, restore), and
+ * the app's page through its grants. No model runs: the job agent's decisions
+ * are written here as the plans and drafts it would send.
+ *
+ *   STRUT_DIR=../strut npm test
+ */
+import { after, before, describe, it } from "node:test";
+import assert from "node:assert/strict";
+import { randomBytes } from "node:crypto";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
+
+const STRUT = resolve(process.env["STRUT_DIR"] ?? "../strut");
+for (const k of ["GITHUB_TOKEN", "GH_TOKEN"]) delete process.env[k];
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const from = async <T = any>(path: string): Promise<T> => (await import(pathToFileURL(join(STRUT, "src", path)).href)) as T;
+
+const HERE = resolve(".");
+const APP = "stadeum/canvas/canvas";
+const CANVAS = "stadeum/canvas/canvas";
+const OPS = "stadeum/canvas/ops";
+const IMPLEMENT = "stadeum/canvas/implement";
+const JOB = "job-canvas-test";
+
+describe("stadeum/canvas", () => {
+  let root = "";
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let strut: any, tools: any, store: any;
+  let appIdentity: (name: string, version: string) => string;
+  let STEP_RUN = "";
+  let appVersion = "";
+
+  /** A run of one of the package's workflows, as a person. Its output, or it throws with the run's error. */
+  const run = async (workflow: string, input: Record<string, unknown>, actor = "ada") => {
+    const r = await strut.run(workflow, input, { actor, principal: actor });
+    if (r.status !== "success") throw new Error(String(r.error?.message ?? JSON.stringify(r.error)));
+    return r.output.result ?? r.output;
+  };
+  const canvas = (input: Record<string, unknown>) => run(CANVAS, { job: JOB, ...input }, "ada");
+  const ops = (input: Record<string, unknown>) => run(OPS, input, "ada");
+  /** A call from the app's page, as its viewer. */
+  const page = async (type: string, config: Record<string, unknown>) => {
+    const t = tools.buildAppTools({ apps: strut.apps, registry: strut.getRegistry(), services: strut.services, actor: "ada", admin: false, runStepDeps: { store, workspace: strut.workspace } });
+    return t[STEP_RUN].execute({ type, config, app: appIdentity(APP, appVersion) }, { toolCallId: "t", messages: [] }) as Promise<{ error?: string; result?: any }>;
+  };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const find = async (type: string): Promise<any[]> => (await page("graph/find", { node_type: type, where: { removed_at: null }, limit: 500 })).result?.nodes ?? [];
+
+  before(async () => {
+    delete process.env["STRUT_API_KEY"];
+    root = await mkdtemp(join(tmpdir(), "strut-canvas-test-"));
+    store = new (await from("store.ts")).MemoryRunStore();
+    const { createStrut } = await from("createStrut.ts");
+    const { openGraphBackend } = await from("graph/backend.ts");
+    const { PRIVATE_NAMESPACE } = await from("graph/ladybug/namespaces.ts");
+    const { GraphWorkspaceStore } = await from("graph/workspace-store.ts");
+    const { kitForTests } = await from("test-util/app-kit.ts");
+    tools = await from("apps/tools.ts");
+    STEP_RUN = tools.STEP_RUN_TOOL;
+    appIdentity = (await from("auth.ts")).appIdentity;
+    const graph = await openGraphBackend({ kind: "ladybug", path: join(root, "graph.lbug"), namespace: PRIVATE_NAMESPACE }, { embeddings: false });
+    strut = await createStrut({
+      workspace: new GraphWorkspaceStore(graph, { materializeDir: join(root, "steps"), appsDir: join(root, "apps") }),
+      dataDir: root,
+      store,
+      kit: await kitForTests(),
+      serveUi: false,
+      enableChat: false,
+      autoResume: false,
+      // The app grants these and compiles in strut/jamie's chat (which imports strut/views).
+      orchestrator: true,
+      builder: true,
+      systemWorkflows: false,
+      browserWorkflows: false,
+      privacyWorkflows: false,
+      mediaWorkflows: false,
+      // Strut's own pages, `Job` among them, which Canvas Planning goes under.
+      concepts: { personal: false, claims: false },
+      stt: false,
+      earnings: false,
+      staff: false,
+      worker: false,
+      git: { local: false },
+    });
+    // Installed by a person, as a box's admin does: the key, and their actor.
+    const key = `key-${randomBytes(8).toString("hex")}`;
+    process.env["STRUT_API_KEY"] = key;
+    try {
+      const res = await strut.app.request("/packages/install", {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${key}`, "x-strut-actor": "root" },
+        body: JSON.stringify({ ref: `file:${HERE}` }),
+      });
+      const body = await res.json();
+      assert.equal(res.status, 201, JSON.stringify(body));
+      assert.deepEqual(body.warnings, []);
+    } finally {
+      delete process.env["STRUT_API_KEY"];
+    }
+    appVersion = (await strut.apps.manifestOf(APP)).version;
+  });
+  after(async () => {
+    await strut?.close?.().catch(() => {});
+    await rm(root, { recursive: true, force: true, maxRetries: 5 });
+  });
+
+  // Filled in as the plan is written, read by the tests after.
+  const ids: Record<string, string> = {};
+
+  it("installs its app, built against this strut's kit, and its pages under Job", async () => {
+    assert.match(appVersion, /^v\d+$/);
+    const found = await run("stadeum/canvas/canvas", { mode: "read" });
+    assert.equal(found.level, "top");
+  });
+
+  it("writes a plan the job decided: an initiative, its why, its road", async () => {
+    const out = await canvas({
+      prompt: "Plan self-serve onboarding",
+      plan: {
+        new_initiative: { name: "Self-serve onboarding" },
+        brief: { title: "Teams set up alone", text: "New teams wait days for a person to set them up." },
+        stories: [{ text: "As a new admin I set up my workspace alone", requirements: ["Setup takes under ten minutes", "No call with us is needed"] }],
+        milestones: ["Guided setup", "Invites"],
+        features: [{ milestone: "Guided setup", name: "Setup checklist", satisfies: ["Setup takes under ten minutes"] }],
+      },
+    });
+    assert.equal(out.action, "write", JSON.stringify(out));
+    ids["initiative"] = out.initiative_ref;
+    const read = await canvas({ mode: "read", about: ids["initiative"] });
+    const ini = read.initiative;
+    assert.equal(ini.node.name, "Self-serve onboarding");
+    assert.equal(ini.node.status, "planned");
+    assert.equal(ini.briefs.length, 1);
+    assert.equal(ini.stories[0].requirements.length, 2);
+    assert.deepEqual(ini.milestones.map((m: { name: string; sequence: number }) => [m.name, m.sequence]), [["Guided setup", 1], ["Invites", 2]]);
+    const f = ini.milestones[0].features[0];
+    assert.equal(f.name, "Setup checklist");
+    assert.equal(f.status, "planned");
+    assert.equal(f.satisfies.length, 1);
+    ids["milestone"] = ini.milestones[0].ref_id;
+    ids["invites"] = ini.milestones[1].ref_id;
+    ids["feature"] = f.ref_id;
+    ids["req"] = read.requirements.find((r: { text: string }) => r.text === "Setup takes under ten minutes").ref_id;
+    ids["req2"] = read.requirements.find((r: { text: string }) => r.text === "No call with us is needed").ref_id;
+    // The app reads the same plan with its own grants.
+    assert.deepEqual((await find("Initiative")).map((n) => n.name ?? n.properties?.name), ["Self-serve onboarding"]);
+  });
+
+  it("refuses a second initiative of the same name, and takes statuses as people say them", async () => {
+    await assert.rejects(canvas({ plan: { new_initiative: { name: "self-serve  Onboarding" } } }), /DUPLICATE_INITIATIVE/);
+    await assert.rejects(ops({ op: "add", kind: "initiative", text: "Self-serve onboarding" }), /already an initiative named/);
+    await canvas({ about: ids["initiative"], plan: { edits: [{ ref_id: ids["milestone"], field: "status", value: "in progress" }] } });
+    const st = await ops({ op: "set_status", ref_id: ids["feature"], value: "done" });
+    assert.equal(st.status, "done");
+    await ops({ op: "set_status", ref_id: ids["feature"], value: "BLOCKED", reason: "waiting on design" });
+    const read = await canvas({ mode: "read", about: ids["feature"] });
+    const m = read.initiative.milestones[0];
+    assert.equal(m.status, "active");
+    assert.equal(m.features[0].status, "done");
+    assert.equal(m.features[0].blocked, true);
+    await assert.rejects(ops({ op: "set_status", ref_id: ids["feature"], value: "someday" }), /is not a status/);
+  });
+
+  it("writes a brainstorm draft about a card, refusing a broken one whole", async () => {
+    const effects = (score: number) => [{ name: "Faster start", description: "Teams start the same day.", score, requirement: ids["req"] }];
+    const ratings = { fast: 0.5, good: 0.2, cheap: -0.1 };
+    // Two recommended options under one question: refused, nothing written.
+    await assert.rejects(
+      canvas({
+        about: ids["milestone"],
+        prompt: "How should guided setup work?",
+        brainstorm: {
+          actions: [
+            { op: "add", tmp: "q1", parent: null, kind: "question", text: "How is setup guided?", made_by: "model", criteria: "speed, effort", reversibility: "two_way" },
+            { op: "add", tmp: "o1", parent: "q1", kind: "option", text: "A checklist", made_by: "model", makes: ["Checklist"], effects: effects(0.6), ratings, recommended: true },
+            { op: "add", tmp: "o2", parent: "q1", kind: "option", text: "A wizard", made_by: "model", makes: ["Wizard"], effects: effects(0.4), ratings, recommended: true },
+          ],
+        },
+      }),
+      /refused and nothing was written.*recommended options/,
+    );
+    assert.equal((await find("Question")).length, 0);
+
+    const out = await canvas({
+      about: ids["milestone"],
+      prompt: "How should guided setup work? Maybe just a video",
+      brainstorm: {
+        actions: [
+          { op: "add", tmp: "q1", parent: null, kind: "question", text: "How is setup guided?", made_by: "model", criteria: "speed, effort", reversibility: "two_way" },
+          { op: "add", tmp: "o1", parent: "q1", kind: "option", text: "A checklist", made_by: "model", makes: ["Checklist"], effects: effects(0.6), ratings, recommended: true },
+          { op: "add", tmp: "o2", parent: "q1", kind: "option", text: "Just a video", made_by: "user", quote: "just a video", makes: [], effects: effects(-0.3), ratings },
+        ],
+      },
+    });
+    assert.equal(out.action, "brainstorm", JSON.stringify(out));
+    ids["question"] = out.root;
+    assert.match(out.outline, /How is setup guided\?/);
+    assert.match(out.outline, /A\. A checklist \[model, open, recommended\]/);
+    // The app's side panel.
+    const tree = await page("stadeum/canvas/brainstorm-tree", { root: ids["question"] });
+    assert.equal(tree.error, undefined, tree.error);
+    const [q, a, b] = tree.result.nodes;
+    assert.equal(q.kind, "question");
+    assert.equal(a.label, "A");
+    assert.equal(a.recommended, true);
+    assert.deepEqual(a.ratings, { fast: 0.5, good: 0.2, cheap: -0.1 });
+    assert.deepEqual(a.effects.map((e: { direction: string; score: number }) => [e.direction, e.score]), [["pro", 0.6]]);
+    assert.equal(b.made_by, "user");
+    assert.deepEqual(b.effects.map((e: { direction: string }) => e.direction), ["con"]);
+    ids["optionA"] = a.ref_id;
+    // A later turn reads the tree it continues.
+    const again = await canvas({ mode: "read", about: ids["question"] });
+    assert.equal(again.root, ids["question"]);
+    assert.equal(again.brainstorms.length, 1);
+  });
+
+  it("lets a person add an option, choose one, and take it back", async () => {
+    const added = await ops({ op: "add_option", parent: ids["question"], text: "Pair with a teammate" });
+    assert.equal(added.root, ids["question"]);
+    await ops({ op: "choose", ref_id: ids["optionA"] });
+    let t = (await page("stadeum/canvas/brainstorm-tree", { root: ids["question"] })).result;
+    assert.equal(t.state, "decided");
+    assert.equal(t.nodes.find((n: { ref_id: string }) => n.ref_id === ids["optionA"]).state, "chosen");
+    assert.equal(t.nodes.find((n: { ref_id: string }) => n.ref_id === added.ref_id).made_by, "user");
+    await ops({ op: "unchoose", ref_id: ids["optionA"] });
+    t = (await page("stadeum/canvas/brainstorm-tree", { root: ids["question"] })).result;
+    assert.equal(t.state, "open");
+    await assert.rejects(ops({ op: "choose", ref_id: ids["question"] }), /only an option is chosen/);
+  });
+
+  it("removes a card with everything under it, and puts it back", async () => {
+    const r = await ops({ op: "remove", ref_id: ids["invites"] });
+    assert.equal(r.removed.length, 1);
+    let read = await canvas({ mode: "read", about: ids["initiative"] });
+    assert.deepEqual(read.initiative.milestones.map((m: { name: string }) => m.name), ["Guided setup"]);
+    assert.equal((await find("Milestone")).length, 1);
+    await ops({ op: "restore", ref_id: ids["invites"] });
+    read = await canvas({ mode: "read", about: ids["initiative"] });
+    assert.deepEqual(read.initiative.milestones.map((m: { name: string }) => m.name), ["Guided setup", "Invites"]);
+    // A milestone takes its features and the brainstorm about it along, and brings them back.
+    const m = await ops({ op: "remove", ref_id: ids["milestone"] });
+    assert.deepEqual(new Set(m.removed.map((x: { node_type: string }) => x.node_type)), new Set(["Milestone", "Feature", "Question", "Option", "Effect"]));
+    assert.equal((await find("Question")).length, 0);
+    await ops({ op: "restore", ref_id: ids["milestone"] });
+    assert.equal((await find("Question")).length, 1);
+    assert.equal((await find("Feature")).length, 1);
+  });
+
+  it("implements a feature only once it has an architecture, and keeps its work from being removed", async () => {
+    await assert.rejects(run(IMPLEMENT, { feature: ids["feature"], dry_run: true }), /has no architecture yet/);
+    await canvas({ about: ids["feature"], plan: { architectures: [{ feature: ids["feature"], name: "A checklist page over the setup steps", summary: "One page, each step a row." }] } });
+    const dry = await run(IMPLEMENT, { feature: ids["feature"], dry_run: true });
+    assert.match(dry.title, /^Implement: Setup checklist \[/);
+    // A job on the feature (as `implement` records it) is work: the feature, and what it is under, cannot be removed.
+    await strut.workspace.publishWorkflowByContent("test/record", `steps:\n  - id: s\n    type: stadeum/canvas/job-started\n    config: ${JSON.stringify({ feature: ids["feature"], job: "job-build-1" })}\n`);
+    const rec = await strut.run("test/record", {}, { actor: "ada", principal: "ada" });
+    assert.equal(rec.status, "success", JSON.stringify(rec.error));
+    await assert.rejects(ops({ op: "remove", ref_id: ids["feature"] }), /work_started/);
+    await assert.rejects(ops({ op: "remove", ref_id: ids["req"] }), /work_started/);
+    await assert.rejects(canvas({ about: ids["initiative"], plan: { deletes: [ids["milestone"]] } }), /work_started/);
+    // A requirement no feature satisfies is not work.
+    const r = await ops({ op: "remove", ref_id: ids["req2"] });
+    assert.equal(r.removed.length, 1);
+  });
+
+  it("ships its pages", async () => {
+    for (const name of ["Canvas Planning", "Brainstorm", "Brainstorm Method", "Brainstorm Framing"]) {
+      const text = await readFile(join(HERE, "concepts", `${name}.md`), "utf8");
+      assert.match(text, new RegExp(`^---\\nname: ${name}\\n`));
+      assert.doesNotMatch(text, /\bHive\b|org_id|HiveInitiative|InitiativeFeature/);
+    }
+  });
+});

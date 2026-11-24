@@ -1,0 +1,33 @@
+type_description: "A decision in a brainstorm (an IBIS tree). Its options hang under it (PARENT_OF), as can sub-questions; a root question is ABOUT the initiative, milestone or feature it decides for. state is open or decided. made_by is user (a person said it, quote holds their words) or model. Kept by the stadeum/canvas package; the Brainstorm page says the rest."
+attributes:
+  name: string
+  text: string
+  made_by: string
+  by: ?string
+  speaker: ?string
+  quote: ?string
+  state: string
+  state_reason: ?string
+  state_by: ?string
+  state_at: ?int
+  state_run: ?string
+  job: ?string
+  run_id: ?string
+  turn: ?int
+  seq: ?int
+  criteria: ?string
+  reversibility: ?string
+  removed_at: ?int
+  removed_by: ?string
+  removed_reason: ?string
+  removed_run: ?string
+  removed_top: ?string
+key_spec: ref_id
+index: [text, quote]
+title_key: text
+edges:
+  - [PARENT_OF, Option]
+  - [PARENT_OF, Question]
+  - [ABOUT, Initiative]
+  - [ABOUT, Milestone]
+  - [ABOUT, Feature]

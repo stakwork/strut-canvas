@@ -1,0 +1,33 @@
+type_description: "One answer to a brainstorm question. state is open, chosen, rejected or simulated; recommended marks at most one per question. fast, good and cheap rate it from -1 to 1; makes is a JSON list of what choosing it would create one level down. A follow-up question may hang under it. Kept by the stadeum/canvas package."
+attributes:
+  name: string
+  text: string
+  made_by: string
+  by: ?string
+  speaker: ?string
+  quote: ?string
+  state: string
+  state_reason: ?string
+  state_by: ?string
+  state_at: ?int
+  state_run: ?string
+  job: ?string
+  run_id: ?string
+  turn: ?int
+  seq: ?int
+  recommended: ?boolean
+  fast: ?float
+  good: ?float
+  cheap: ?float
+  makes: ?string
+  removed_at: ?int
+  removed_by: ?string
+  removed_reason: ?string
+  removed_run: ?string
+  removed_top: ?string
+key_spec: ref_id
+index: [text, quote]
+title_key: text
+edges:
+  - [PARENT_OF, Question]
+  - [HAS_EFFECT, Effect]

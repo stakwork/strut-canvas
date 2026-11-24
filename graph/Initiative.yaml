@@ -1,0 +1,24 @@
+type_description: "A goal a team plans on the canvas: the problem, with its brief, stories and milestones. status is planned, active, done or dropped. Kept by the stadeum/canvas package; the Canvas Planning page says what each field holds."
+attributes:
+  name: string
+  description: ?string
+  status: string
+  blocked: ?boolean
+  blocked_reason: ?string
+  completed_at: ?string
+  target_date: ?string
+  author: ?string
+  created_by_kind: ?string
+  removed_at: ?int
+  removed_by: ?string
+  removed_reason: ?string
+  removed_run: ?string
+  removed_top: ?string
+key_spec: ref_id
+index: [name, description]
+title_key: name
+edges:
+  - [HAS_BRIEF, Brief]
+  - [HAS_STORY, UserStory]
+  - [HAS_MILESTONE, Milestone]
+  - [HAS_FEATURE, Feature]

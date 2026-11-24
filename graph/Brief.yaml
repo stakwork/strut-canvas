@@ -1,0 +1,14 @@
+type_description: "Why an initiative exists: the problem, in the person's words. Kept by the stadeum/canvas package."
+attributes:
+  name: string
+  text: string
+  author: ?string
+  created_by_kind: ?string
+  removed_at: ?int
+  removed_by: ?string
+  removed_reason: ?string
+  removed_run: ?string
+  removed_top: ?string
+key_spec: ref_id
+index: [name, text]
+title_key: name

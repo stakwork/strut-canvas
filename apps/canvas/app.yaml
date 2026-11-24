@@ -1,0 +1,36 @@
+title: Infinite Canvas
+description: >-
+  Plan and build initiatives on one canvas: the initiatives in progress ringed round the centre, each opening
+  into a road through its milestones with their features beside it, its brainstorm as a tree of decisions, why
+  it exists on a sheet beside it, what each card's jobs built, and Jamie docked beside the map.
+icon: lightbulb
+entry: src/App.tsx
+grants:
+  # ops: every change a person makes. implement: Implement on a feature.
+  # orchestrator, job, builder: strut/jamie's Thread, compiled in, launches and follows these.
+  workflows: [stadeum/canvas/ops, stadeum/canvas/implement, orchestrator, job, builder]
+  steps:
+    # Reads: the plan, its brainstorms and why, the links among them, and the change feed.
+    - graph/find
+    - graph/graph-edges
+    - graph/changes
+    # One brainstorm's whole tree, a card's build (jobs, pull requests, artifacts), and the viewer's Jamie conversations here.
+    - stadeum/canvas/brainstorm-tree
+    - stadeum/canvas/work
+    - stadeum/canvas/threads
+    # Needs you and Working now; pending plan changes drawn in pencil, decided here.
+    - job/list
+    - proposal/list
+    - proposal/get
+    - proposal/decide
+    # What strut/jamie's job, artifact and pull-request cards call.
+    - job/get
+    - job/updates
+    - job/verify
+    - job/evidence
+    - sheets/get-values
+    - github/pr-status
+    - github/merge-pr
+    - secret/add
+  sqlite: false
+  automations: []

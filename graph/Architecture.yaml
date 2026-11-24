@@ -1,0 +1,15 @@
+type_description: "How a feature is built: a summary (description) and an optional mermaid diagram. Kept by the stadeum/canvas package."
+attributes:
+  name: string
+  description: ?string
+  diagram: ?string
+  author: ?string
+  created_by_kind: ?string
+  removed_at: ?int
+  removed_by: ?string
+  removed_reason: ?string
+  removed_run: ?string
+  removed_top: ?string
+key_spec: ref_id
+index: [name, description]
+title_key: name

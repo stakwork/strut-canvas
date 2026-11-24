@@ -1,0 +1,19 @@
+type_description: "What choosing an option would cause, weighed AGAINST one requirement: score from -1 (hurts it) to 1 (serves it). Kept by the stadeum/canvas package."
+attributes:
+  name: string
+  description: string
+  score: float
+  made_by: ?string
+  job: ?string
+  run_id: ?string
+  turn: ?int
+  removed_at: ?int
+  removed_by: ?string
+  removed_reason: ?string
+  removed_run: ?string
+  removed_top: ?string
+key_spec: ref_id
+index: [name, description]
+title_key: name
+edges:
+  - [AGAINST, Requirement]
