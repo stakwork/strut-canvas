@@ -41,6 +41,9 @@ export interface TreeNode {
   speaker: string | null;
   quote: string | null;
   state: string | null;
+  /** Who chose it aloud on a call, and their words. */
+  state_speaker: string | null;
+  state_quote: string | null;
   criteria: string | null;
   reversibility: string | null;
   recommended: boolean;
@@ -230,6 +233,8 @@ export default defineStep({
         speaker: (p["speaker"] as string) ?? null,
         quote: (p["quote"] as string) ?? null,
         state: (p["state"] as string) ?? null,
+        state_speaker: (p["state_speaker"] as string) ?? null,
+        state_quote: (p["state_quote"] as string) ?? null,
         criteria: (p["criteria"] as string) ?? null,
         reversibility: (p["reversibility"] as string) ?? null,
         recommended: !isQ && (p["recommended"] === true || p["recommended"] === "true"),
@@ -302,9 +307,10 @@ export default defineStep({
       ordered.push(n);
       const tag = `[${n.made_by}, ${n.state}${n.speaker ? `, ${n.speaker}` : ""}${n.recommended ? ", recommended" : ""}]`;
       const q = n.quote ? ` — "${n.quote}"` : "";
+      const chose = n.state_quote ? ` (chosen by ${n.state_speaker ?? "?"}: "${n.state_quote}")` : "";
       const crit = n.kind === "question" && (n.criteria || n.reversibility) ? ` {criteria: ${n.criteria ?? "-"}; ${n.reversibility ?? "-"}}` : "";
       const dup = n.other_parents.length ? ` (also linked under ${n.other_parents.map((id) => byId.get(id)?.label || id).join(", ")})` : "";
-      lines.push(`${"  ".repeat(n.depth)}${n.label ? `${n.label}. ` : ""}${n.text} ${tag}${q}${crit}${dup} [${n.ref_id}]`);
+      lines.push(`${"  ".repeat(n.depth)}${n.label ? `${n.label}. ` : ""}${n.text} ${tag}${q}${chose}${crit}${dup} [${n.ref_id}]`);
       if (n.ratings) lines.push(`${"  ".repeat(n.depth + 1)}fast ${n.ratings.fast ?? "?"} · good ${n.ratings.good ?? "?"} · cheap ${n.ratings.cheap ?? "?"}`);
       for (const e of n.effects) lines.push(`${"  ".repeat(n.depth + 1)}effect ${e.score ?? "?"} — ${e.name ?? "(no name)"}: ${e.description ?? ""}`);
       for (const k of kids.get(n.ref_id) ?? []) walk(k);

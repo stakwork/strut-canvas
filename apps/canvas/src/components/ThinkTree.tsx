@@ -160,6 +160,7 @@ function AskNode({ n, style, b, picked, expanded, act, onToggleAsk, onAsk }: Pro
         {chosen && (
           <span className="bt-chosen-line">
             ✓ <span>{chosen.text}</span>
+            {chosen.said?.speaker ? <small>· {chosen.said.speaker}</small> : null}
           </span>
         )}
         <span className="bt-row">
@@ -213,6 +214,11 @@ function OptionNode({ n, style, b, act }: Props & Sty) {
   return (
     <div data-tnode={n.id} data-id={n.id} className={`bt-node bt-opt bt-opt-${o.state}${pencil ? " bt-pencil" : ""}`} style={style}>
       {o.state === "chosen" && <span className="bt-stamp">✓ Chosen</span>}
+      {o.state === "chosen" && o.said && (
+        <small className="bt-said">
+          {o.said.speaker}: “{o.said.quote}”
+        </small>
+      )}
       <strong className={o.hand ? "ic-hand" : ""}>
         {o.label ? <b className="ic-letter">{o.label}</b> : null}
         {o.text}

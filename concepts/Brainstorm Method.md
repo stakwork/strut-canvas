@@ -61,7 +61,7 @@ How to write the questions and options of a brainstorm tree. The agent that writ
 
 ## Choosing
 
-- Never choose an option. Choosing is a person's act, on the card.
+- Do not choose an option for a person. Choosing is a person's act, on the card. On a recorded call, record the choice a person says aloud, in their words (**Brainstorm**).
 - To go deeper under an answer, write a follow-up question (Expand). To widen a question, add answers (More options).
 - When a question is decided, do not reopen it. Point the person to the next open question in the tree.
 

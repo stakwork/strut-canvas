@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { cardsOn, shownAs, whyPlace } from "./follow.ts";
+import { cardsOn, chosenOn, shownAs, whyPlace } from "./follow.ts";
 import type { Why } from "./why.ts";
 import type { Plan } from "./plan.ts";
 import type { Brainstorms } from "./brainstorm.ts";
@@ -19,6 +19,13 @@ test("a written ref is shown as its card, its question, or the question its opti
 
 test("the cards a read has: plan cards, questions and options, not proposals", () => {
   assert.deepEqual([...cardsOn(plan, b)].sort(), ["f", "g", "o1", "o2", "q"]);
+});
+
+test("a choice is shown as the question it decides", () => {
+  assert.deepEqual([...chosenOn(b)], []);
+  const decided = { ...b, choices: { o1: { id: "o1", state: "rejected" }, o2: { id: "o2", state: "chosen" } } } as unknown as Brainstorms;
+  assert.deepEqual([...chosenOn(decided)], ["o2"]);
+  assert.equal(shownAs("o2", plan, decided), "q");
 });
 
 const why = {

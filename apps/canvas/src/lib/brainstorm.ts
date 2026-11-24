@@ -72,6 +72,8 @@ export interface Choice {
   ratings: { fast: number | null; good: number | null; cheap: number | null } | null;
   effects: Effect[];
   recommended: boolean;
+  /** Chosen aloud on a call: who said it, and their words. */
+  said?: { speaker: string; quote: string } | null;
 }
 
 export interface Brainstorms {
@@ -142,6 +144,7 @@ export function buildBrainstorms(questions: RawNode[], options: RawNode[], edges
       ratings: fast === null && good === null && cheap === null ? null : { fast, good, cheap },
       effects: [],
       recommended: marked || p["recommended"] === true || p["recommended"] === "true",
+      said: typeof p["state_quote"] === "string" && p["state_quote"] ? { speaker: String(p["state_speaker"] ?? ""), quote: p["state_quote"] } : null,
     };
     order.set(n.ref_id, stampOf(n));
   }

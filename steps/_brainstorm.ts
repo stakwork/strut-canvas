@@ -1,7 +1,8 @@
 /**
  * A person's acts on a brainstorm: writing their own question or option,
- * choosing an option, and taking a choice back. An agent never chooses (the
- * Brainstorm page): its words go through `brainstorm-write`.
+ * choosing an option, and taking a choice back. An agent's words go through
+ * `brainstorm-write`; it chooses only a choice a person said aloud, in their
+ * words (`said`), checked against the transcript by `brainstorm-check`.
  */
 import { ABOUT, OPTION, PARENT_OF, QUESTION, TREE_TYPES, actorOf, call, clip, getNode, getNodes, linked, live, nextSeq, type Node } from "./_canvas.js";
 
@@ -75,11 +76,20 @@ async function optionWithQuestion(ctx: any, ref: string, who: string) {
   return { n, question: up[0] ? await getNode(ctx, up[0].ref_id, who) : null };
 }
 
-/** Mark an option chosen, and its question decided. */
+/** A choice a person said aloud: who said it, and their words. */
+export interface Said {
+  speaker: string;
+  quote: string;
+}
+
+/** Mark an option chosen, and its question decided. `said`: the person who chose it aloud, in their words. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function choose(ctx: any, ref: string, reason = "chosen", who = "canvas") {
+export async function choose(ctx: any, ref: string, reason = "chosen", who = "canvas", said?: Said) {
   const { n, question } = await optionWithQuestion(ctx, ref, who);
-  if (n.properties["state"] !== "chosen") await call(ctx, "graph/edit-node", { ref_id: ref, node_data: { state: "chosen", ...decided(ctx, reason) } }, who);
+  if (n.properties["state"] !== "chosen") {
+    const aloud = said ? { state_speaker: said.speaker, state_quote: said.quote } : {};
+    await call(ctx, "graph/edit-node", { ref_id: ref, node_data: { state: "chosen", ...decided(ctx, reason), ...aloud } }, who);
+  }
   if (question && question.properties["state"] !== "decided") {
     await call(ctx, "graph/edit-node", { ref_id: question.ref_id, node_data: { state: "decided", ...decided(ctx, `"${clip(String(n.properties["text"] ?? ""), 60)}" chosen: ${reason}`) } }, who);
   }
@@ -91,7 +101,8 @@ export async function choose(ctx: any, ref: string, reason = "chosen", who = "ca
 export async function unchoose(ctx: any, ref: string, reason = "changed my mind", who = "canvas") {
   const { n, question } = await optionWithQuestion(ctx, ref, who);
   if (n.properties["state"] !== "chosen") throw new Error(`${who}: "${clip(String(n.properties["text"] ?? ""), 60)}" is not chosen; nothing to take back`);
-  await call(ctx, "graph/edit-node", { ref_id: ref, node_data: { state: "open", ...decided(ctx, reason) } }, who);
+  const aloud = ["state_speaker", "state_quote"].filter((k) => n.properties[k] !== undefined && n.properties[k] !== null);
+  await call(ctx, "graph/edit-node", { ref_id: ref, node_data: { state: "open", ...decided(ctx, reason) }, ...(aloud.length ? { properties_to_be_deleted: aloud } : {}) }, who);
   let reopened = false;
   if (question) {
     const siblings = await linked(ctx, question.ref_id, PARENT_OF, "forward", { types: [OPTION], who });

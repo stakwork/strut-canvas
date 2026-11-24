@@ -82,7 +82,7 @@ export function patchBrainstorms(b: Brainstorms, input: OpsInput): Brainstorms |
       for (const k of asker.options) if (choices[k]) choices[k] = { ...choices[k]!, state: k === id ? "chosen" : "rejected" };
       return { ...b, choices, asks: { ...b.asks, [asker.id]: { ...asker, open: false } } };
     }
-    choices[id] = { ...o, state: "open" };
+    choices[id] = { ...o, state: "open", said: null };
     const still = asker.options.some((k) => k !== id && choices[k]?.state === "chosen");
     if (!still) for (const k of asker.options) if (choices[k]?.state === "rejected") choices[k] = { ...choices[k]!, state: "open" };
     return { ...b, choices, asks: { ...b.asks, [asker.id]: { ...asker, open: !still } } };

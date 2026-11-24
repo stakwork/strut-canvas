@@ -1,15 +1,16 @@
 import { z, defineStep } from "strut";
 import { ABOUT, AGAINST, EFFECT, HAS_EFFECT, OPTION, PARENT_OF, QUESTION, actorOf, call, clip, getNode, live, nextSeq } from "./_canvas.js";
+import { choose, unchoose } from "./_brainstorm.js";
 
 const WHO = "stadeum/canvas/brainstorm-write";
 
 export default defineStep({
   type: "stadeum/canvas/brainstorm-write",
   description:
-    "Write a CHECKED brainstorm draft (adds only, `brainstorm-check` first) in order: each Question and Option linked PARENT_OF under its " +
+    "Write a CHECKED brainstorm draft (`brainstorm-check` first) in order: each Question and Option linked PARENT_OF under its " +
     "parent (an existing ref or an earlier action's tmp), an Option's `makes`, `recommended` and fast/good/cheap ratings, and each effect " +
     "as Option -HAS_EFFECT-> Effect { name, description, score } -AGAINST-> Requirement. A new tree's root question is linked ABOUT the " +
-    "card it is about. The job, run and turn are stamped from the run. On a failure the nodes this turn wrote are taken back. " +
+    "card it is about. Then each choose: the option chosen, with the speaker and their words. The job, run and turn are stamped from the run. On a failure the nodes this turn wrote are taken back. " +
     "Output { root, turn, written: [{ ref_id, node_type, tmp?, text?, parent?, option?, against?, score? }] }.",
   effect: "write",
   input: z.object({
@@ -28,6 +29,7 @@ export default defineStep({
     const tree = cfg.tree ?? {};
     const turn = (tree.nodes ?? []).reduce((m: number, n: { turn?: unknown }) => Math.max(m, Number(n.turn ?? 0)), 0) + 1;
     const created: string[] = [];
+    const chosen: string[] = [];
     const written: Array<Record<string, unknown>> = [];
     const refs: Record<string, string> = {};
     let root = cfg.root ?? "";
@@ -43,6 +45,7 @@ export default defineStep({
         if (!a || !live(a.properties)) throw new Error(`${WHO}: ${cfg.about}, the card the brainstorm is about, is not there`);
       }
       for (const a of actions) {
+        if (a["op"] === "choose") continue;
         const isQ = a["kind"] === "question";
         const parent = a["parent"] ? (refs[a["parent"]] ?? a["parent"]) : null;
         const text = String(a["text"]).trim();
@@ -74,7 +77,17 @@ export default defineStep({
         }
       }
       if (!cfg.root && root && cfg.about) await link(root, ABOUT, cfg.about);
+      // A choice a person said aloud: after the adds, since it may choose an option this draft added.
+      for (const a of actions) {
+        if (a["op"] !== "choose") continue;
+        const ref = refs[a["option"]] ?? a["option"];
+        const said = { speaker: String(a["speaker"]).trim(), quote: String(a["quote"]).trim() };
+        await choose(ctx, ref, `${said.speaker}: "${clip(said.quote, 200)}"`, WHO, said);
+        chosen.push(ref);
+        written.push({ ref_id: ref, node_type: OPTION, chosen: true, speaker: said.speaker });
+      }
     } catch (e) {
+      for (const ref of chosen) await unchoose(ctx, ref, "the brainstorm turn that chose it failed", WHO).catch(() => {});
       let undone = 0;
       for (const ref of [...created].reverse()) {
         try {

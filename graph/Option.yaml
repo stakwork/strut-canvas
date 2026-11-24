@@ -1,4 +1,4 @@
-type_description: "One answer to a brainstorm question. state is open, chosen, rejected or simulated; recommended marks at most one per question. fast, good and cheap rate it from -1 to 1; makes is a JSON list of what choosing it would create one level down. A follow-up question may hang under it. Kept by the stadeum/canvas package."
+type_description: "One answer to a brainstorm question. state is open, chosen, rejected or simulated (state_speaker and state_quote: who chose it aloud on a call, in their words); recommended marks at most one per question. fast, good and cheap rate it from -1 to 1; makes is a JSON list of what choosing it would create one level down. A follow-up question may hang under it. Kept by the stadeum/canvas package."
 attributes:
   name: string
   text: string
@@ -11,6 +11,8 @@ attributes:
   state_by: ?string
   state_at: ?int
   state_run: ?string
+  state_speaker: ?string
+  state_quote: ?string
   job: ?string
   run_id: ?string
   turn: ?int

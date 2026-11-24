@@ -8,10 +8,26 @@ const scan = (x: any, path: string, out: string[]) => {
   else if (x && typeof x === "object") for (const [k, v] of Object.entries(x)) { if (STAMP_KEY.test(k)) out.push(`${path}.${k}`); scan(v, `${path}.${k}`, out); }
 };
 
+/** A transcript line: `[hh:mm] Name: text` or `Name: text`. */
+const LINE = /^\s*(?:\[[^\]]*\]\s*)?([^:\[\]\n]{1,60}):\s*(.*)$/;
+
+/**
+ * Did `speaker` say `quote`, on a line of their own in the transcript? A choice is recorded only from a person's own
+ * words: in a chat, where there are no speakers' lines, the person chooses on the card.
+ */
+export function saidOnLine(transcript: string, speaker: string, quote: string): boolean {
+  const who = norm(speaker), words = norm(quote);
+  if (!who || !words) return false;
+  return transcript.split("\n").some((l) => {
+    const m = LINE.exec(l);
+    return !!m && norm(m[1]) === who && norm(m[2]).includes(words);
+  });
+}
+
 export default defineStep({
   type: "stadeum/canvas/brainstorm-check",
   effect: "read",
-  description: "Structural + brainstorm-rule check of a DRAFT (nothing written), in code. The initiative must have requirements that are not dropped: effects are weighed against them. Draft actions are adds only: { tmp, parent (ref | tmp | null), kind question|option, text, made_by, quote?, speaker?, criteria?, reversibility?, state?, makes?: string[], effects?: [{ name, description, score -1..1, requirement (ref_id) }], ratings?: { fast, good, cheap }, recommended? }. Checks parents, IBIS shape, verbatim quotes, criteria+reversibility on questions, every option has effects (score in [-1,1], non-zero, against a live requirement), three ratings in [-1,1], makes ([] at a feature, <=12 unique names), at most one recommended model option per question (open, not the person's), and that the model output carries NO stamp fields (created_at, updated_at, created_by, created_by_kind: code sets them). The '(recommended)' suffix is added by the writer step from the flag; it is shown once in the outline. Output { ok, problems, outline }.",
+  description: "Structural + brainstorm-rule check of a DRAFT (nothing written), in code. The initiative must have requirements that are not dropped: effects are weighed against them. Draft actions are adds: { op: add, tmp, parent (ref | tmp | null), kind question|option, text, made_by, quote?, speaker?, criteria?, reversibility?, state?, makes?: string[], effects?: [{ name, description, score -1..1, requirement (ref_id) }], ratings?: { fast, good, cheap }, recommended? }, and chooses: { op: choose, option (ref | tmp), speaker, quote } — a choice a person said aloud, recorded only when `quote` is in a transcript line of `speaker`'s own ([hh:mm] Name: text) and the question has no chosen option yet. Checks parents, IBIS shape, verbatim quotes, criteria+reversibility on questions, every option has effects (score in [-1,1], non-zero, against a live requirement), three ratings in [-1,1], makes ([] at a feature, <=12 unique names), at most one recommended model option per question (open, not the person's), and that the model output carries NO stamp fields (created_at, updated_at, created_by, created_by_kind: code sets them). The '(recommended)' suffix is added by the writer step from the flag; it is shown once in the outline. Output { ok, problems, outline }.",
   input: z.object({
     draft: z.any(),
     tree: z.any().optional(),
@@ -31,7 +47,8 @@ export default defineStep({
     const prompt = norm(cfg.prompt);
     const problems: string[] = [];
     const P = (m: string) => problems.push(m);
-    if (![...reqs.values()].some((r: any) => r.status !== "dropped")) P("the initiative has no requirements that are not dropped: effects are weighed against requirements, so write the stories and their requirements first");
+    const adds = actions.some((a) => !a?.op || a.op === "add");
+    if (adds && ![...reqs.values()].some((r: any) => r.status !== "dropped")) P("the initiative has no requirements that are not dropped: effects are weighed against requirements, so write the stories and their requirements first");
     const stamps: string[] = [];
     scan(cfg.draft, "draft", stamps);
     if (stamps.length) P(`the draft contains stamp fields (${stamps.join(", ")}): created_at, updated_at, created_by and created_by_kind are set by code, never by the model — remove them`);
@@ -39,10 +56,28 @@ export default defineStep({
     const byTmp = new Map<string, any>();
     const children = new Map<string, any[]>();
     const out: string[] = [];
+    const chosen = new Set<string>();
     const shown = (a: any) => `${String(a.text ?? "").trim()}${a.recommended ? " (recommended)" : ""}`;
     actions.forEach((a, i) => {
       const where = `action ${i + 1} (${a.tmp ?? "?"} "${String(a.text ?? "").slice(0, 50)}")`;
-      if (a.op && a.op !== "add") { P(`${where}: only adds are allowed (choosing, rejecting and removing are people's acts on the card)`); return; }
+      if (a.op === "choose") {
+        const w = `action ${i + 1} (choose ${a.option ?? "?"})`;
+        const o = byTmp.get(a.option) ?? existing.get(a.option);
+        const kind = o?.kind ?? (o?.node_type === "Option" ? "option" : o?.node_type === "Question" ? "question" : null);
+        if (!o) { P(`${w}: option ${a.option} is neither in the tree nor added earlier in this draft`); return; }
+        if (kind !== "option") { P(`${w}: only an option is chosen`); return; }
+        if (o.state === "rejected") P(`${w}: "${String(o.text ?? "").slice(0, 50)}" was rejected`);
+        if (!String(a.speaker ?? "").trim() || !String(a.quote ?? "").trim()) P(`${w}: a choice needs the speaker who made it and their words as quote`);
+        else if (!saidOnLine(String(cfg.prompt ?? ""), a.speaker, a.quote)) P(`${w}: "${String(a.quote).slice(0, 60)}" is not on a line of ${a.speaker}'s in the transcript; a choice is recorded only from a person's own words (in a chat, the person chooses on the card)`);
+        const q = o.parent;
+        const taken = q ? [...(tree.nodes ?? []), ...byTmp.values()].some((n: any) => n.parent === q && n.kind === "option" && n.state === "chosen" && n.ref_id !== a.option)
+          || chosen.has(q) : false;
+        if (taken) P(`${w}: its question already has a chosen option; a person takes that back on the card`);
+        if (q) chosen.add(q);
+        out.push(`  CHOOSE ${a.option}: ${String(o.text ?? "").trim()} — ${a.speaker}: "${a.quote}"`);
+        return;
+      }
+      if (a.op && a.op !== "add") { P(`${where}: op must be add or choose (rejecting and removing are people's acts on the card)`); return; }
       if (!a.tmp || byTmp.has(a.tmp)) P(`${where}: tmp id missing or duplicated`);
       if (!String(a.text ?? "").trim()) P(`${where}: empty text`);
       if (a.kind !== "question" && a.kind !== "option") { P(`${where}: kind must be question or option`); return; }

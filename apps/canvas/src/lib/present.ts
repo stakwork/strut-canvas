@@ -15,7 +15,7 @@ import { useJobUpdates } from "@strut/kit";
 import type { Plan } from "./plan";
 import type { Brainstorms } from "./brainstorm";
 import type { Why } from "./why";
-import { cardsOn, shownAs } from "./follow";
+import { cardsOn, chosenOn, shownAs } from "./follow";
 import { readAgain, readsOfTypes } from "./read";
 
 /** How long a new card stays marked. */
@@ -40,7 +40,7 @@ export function usePresenter(job: string | null, plan: Plan | undefined, b: Brai
   const qc = useQueryClient();
   const updates = useJobUpdates(job ?? undefined, { enabled: on });
   const opened = useRef(Date.now());
-  const known = useRef<Set<string> | null>(null);
+  const known = useRef<{ cards: Set<string>; chosen: Set<string> } | null>(null);
   const [fresh, setFresh] = useState<Map<string, number>>(new Map());
   const [target, setTarget] = useState<Presenter["target"]>(null);
 
@@ -62,19 +62,20 @@ export function usePresenter(job: string | null, plan: Plan | undefined, b: Brai
     return () => clearTimeout(t);
   }, [status?.at, status?.title]);
 
-  // A read with cards the last one did not have: mark them, and bring the newest to the middle.
+  // A read with cards (or choices) the last one did not have: mark them, and bring the newest to the middle.
   useEffect(() => {
     if (!on || !plan || !b || !why) return;
-    const now = cardsOn(plan, b, why);
+    const now = { cards: cardsOn(plan, b, why), chosen: chosenOn(b) };
     const was = known.current;
     known.current = now;
     if (!was) return;
     const shown: string[] = [];
-    for (const ref of now) {
-      if (was.has(ref)) continue;
+    const show = (ref: string) => {
       const id = shownAs(ref, plan, b, why);
       if (id && !shown.includes(id)) shown.push(id);
-    }
+    };
+    for (const ref of now.cards) if (!was.cards.has(ref)) show(ref);
+    for (const ref of now.chosen) if (!was.chosen.has(ref)) show(ref);
     if (!shown.length) return;
     const at = Date.now();
     setFresh((f) => {

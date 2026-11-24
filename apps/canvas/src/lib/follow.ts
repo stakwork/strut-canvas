@@ -28,6 +28,11 @@ export function cardsOn(plan: Plan, b: Brainstorms, why?: Why): Set<string> {
   return out;
 }
 
+/** The options chosen: a choice recorded while the canvas is shown is brought to the middle like a new card. */
+export function chosenOn(b: Brainstorms): Set<string> {
+  return new Set(Object.values(b.choices).filter((c) => c.state === "chosen").map((c) => c.id));
+}
+
 /** The initiative a brief, story or requirement belongs to, and the story to open on its Why sheet. Null for anything
  *  else. */
 export function whyPlace(ref: string, why: Why): { goal: string; story: string | null; requirement: string | null } | null {

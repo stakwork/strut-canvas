@@ -249,6 +249,47 @@ describe("stadeum/canvas", () => {
     await assert.rejects(ops({ op: "choose", ref_id: ids["question"] }), /only an option is chosen/);
   });
 
+  it("records a choice a person said aloud on a call, and only then", async () => {
+    const effects = [{ name: "Quick", description: "Done in a day.", score: 0.5, requirement: ids["req"] }];
+    const ratings = { fast: 0.5, good: 0.1, cheap: 0.3 };
+    const call = [
+      "[14:02] Cleo: what about a short tour instead?",
+      "[14:03] Jamie: I can put a tour on the canvas.",
+      "[14:03] Ben: we're agreed, the tour it is. Jamie, put that down",
+    ].join("\n");
+    const draft = (speaker: string, quote: string) => ({
+      actions: [
+        { op: "add", tmp: "t", parent: ids["question"], kind: "option", text: "A short tour", made_by: "user", quote: "a short tour", speaker: "Cleo", makes: [], effects, ratings },
+        { op: "choose", option: "t", speaker, quote },
+      ],
+    });
+    // Words that are not that speaker's, Jamie's own, or a chat with no speakers: refused whole.
+    await assert.rejects(canvas({ about: ids["question"], prompt: call, brainstorm: draft("Cleo", "the tour it is") }), /not on a line of Cleo's/);
+    await assert.rejects(canvas({ about: ids["question"], prompt: "we're agreed, the tour it is", brainstorm: draft("ada", "the tour it is") }), /not on a line of ada's/);
+    assert.equal((await find("Option")).filter((o) => o.properties.text === "A short tour").length, 0);
+
+    const out = await canvas({ about: ids["question"], prompt: call, brainstorm: draft("Ben", "we're agreed, the tour it is") });
+    assert.equal(out.action, "brainstorm", JSON.stringify(out));
+    assert.match(out.outline, /A short tour \[user, chosen, Cleo\].*\(chosen by Ben: "we're agreed, the tour it is"\)/);
+    let t = (await page("stadeum/canvas/brainstorm-tree", { root: ids["question"] })).result;
+    assert.equal(t.state, "decided");
+    const tour = t.nodes.find((n: { text: string }) => n.text === "A short tour");
+    assert.equal(tour.state, "chosen");
+
+    // Decided: a second choice waits for a person to take the first back.
+    await assert.rejects(
+      canvas({ about: ids["question"], prompt: call, brainstorm: { actions: [{ op: "choose", option: ids["optionA"], speaker: "Ben", quote: "the tour it is" }] } }),
+      /already has a chosen option/,
+    );
+    await ops({ op: "unchoose", ref_id: tour.ref_id });
+    t = (await page("stadeum/canvas/brainstorm-tree", { root: ids["question"] })).result;
+    assert.equal(t.state, "open");
+    // Taken back, the words go with it.
+    const read = await canvas({ mode: "read", about: ids["question"] });
+    assert.match(read.outline, /A short tour \[user, open, Cleo\]/);
+    assert.doesNotMatch(read.outline, /chosen by/);
+  });
+
   it("removes a card with everything under it, and puts it back", async () => {
     const r = await ops({ op: "remove", ref_id: ids["invites"] });
     assert.equal(r.removed.length, 1);

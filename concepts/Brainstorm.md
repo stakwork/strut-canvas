@@ -51,7 +51,14 @@ At most 12 names. `makes` says what choosing the option would lead to; choosing 
 
 ## Choosing is a person's act
 
-The person does it on the card. A job never chooses.
+The person does it on the card. A job does not choose for them.
+
+One exception: on a recorded call nobody can press a card, so the scribe
+(**Call Canvas**) records a choice a person says aloud. The draft action is
+`{ op: "choose", option, speaker, quote }`: `option` is the option's ref_id,
+or the `tmp` of an option added earlier in the same draft. `quote` is the
+speaker's exact words, from their own line of the transcript. Anything else
+is refused.
 
 - The Option becomes `chosen`. The Question becomes `decided`.
 - Un-choosing opens the Option again, and the Question too unless another option under it is still chosen.

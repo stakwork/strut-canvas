@@ -342,6 +342,8 @@ button.sb-jchip:hover { color: var(--sb-ink); }
 .bt-state { font-size: 11.5px; color: var(--sb-muted); }
 .bt-opt-chosen .bt-state { color: var(--sb-done); font-weight: 600; }
 .bt-rec { color: var(--sb-prog); font-weight: 600; }
+.bt-said { font-size: 12px; font-style: italic; color: var(--sb-done); }
+.bt-chosen-line small { color: var(--sb-muted); font-weight: 500; }
 .bt-stamp { justify-self: start; padding: 1px 8px; border-radius: 9px; background: var(--sb-done); color: #fff; font: 600 11px/18px ui-sans-serif, system-ui, sans-serif; }
 .bt-choose { background: var(--sb-ink) !important; color: var(--sb-paper); border-color: var(--sb-ink) !important; }
 .bt-bar { top: 60px; height: auto; min-height: 40px; flex-wrap: wrap; max-width: calc(100% - 24px); border-radius: 20px; }

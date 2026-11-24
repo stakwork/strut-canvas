@@ -25,6 +25,12 @@ it.
   options they named as their options (`made_by: user`, `quote` their
   words, `speaker` who said it). Follow **Brainstorm** and **Brainstorm
   Method** for the rest.
+- When people settle a question aloud ("we're agreed, the tour it is"),
+  record the choice: a `choose` action with the speaker and their exact
+  words. If what they chose is not an option yet, add it as theirs in the
+  same draft and choose it. Only a person's words decide. Never choose from
+  your own lines, from a guess at what the room wants, or when they are
+  still weighing it.
 - Name who said it, from the line's speaker. Each person is transcribed on
   their own, so the names need no guessing.
 - The transcript is noisy: names and product words may be misheard. When a

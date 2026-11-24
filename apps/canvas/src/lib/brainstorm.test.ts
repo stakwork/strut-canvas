@@ -15,7 +15,7 @@ const b = buildBrainstorms(
   [
     node("o1", { text: "A checklist", seq: 3, fast: 0.5, good: 0.4, cheap: 0.6, recommended: true }),
     node("o2", { text: "A tour", seq: 4, made_by: "user", speaker: "Cleo", by: "evan" }),
-    node("o3", { text: "The admin", seq: 7, state: "chosen" }),
+    node("o3", { text: "The admin", seq: 7, state: "chosen", state_speaker: "Ben", state_quote: "the admin does it" }),
     node("o4", { text: "Anyone", seq: 8 }),
     node("o5", { text: "Two minutes", seq: 10 }),
   ],
@@ -99,4 +99,12 @@ test("an option the agent marked (recommended) in its words shows the mark, not 
   const r = buildBrainstorms([node("q", { text: "Which?" })], [node("o", { text: "Send right away (recommended)" })], [{ source: "q", target: "o", edge_type: "PARENT_OF" }], plan);
   assert.equal(r.choices["o"]!.text, "Send right away");
   assert.equal(r.choices["o"]!.recommended, true);
+});
+
+test("a choice said aloud on a call keeps who said it and their words, until it is taken back", () => {
+  assert.deepEqual(b.choices["o3"]!.said, { speaker: "Ben", quote: "the admin does it" });
+  assert.equal(b.choices["o4"]!.said, null);
+  const back = patchBrainstorms(b, { op: "unchoose", ref_id: "o3" })!;
+  assert.equal(back.choices["o3"]!.state, "open");
+  assert.equal(back.choices["o3"]!.said, null);
 });
