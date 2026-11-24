@@ -36,6 +36,7 @@ import { useTrees } from "./lib/read";
 import { BuildPanel } from "./components/Build";
 import { Palette } from "./components/Palette";
 import { workFor } from "./lib/why";
+import { usePresenter } from "./lib/present";
 import type { Hit } from "./lib/search";
 
 const STATE_WORD: Record<State, string> = { idle: "Not started", prog: "In progress", done: "Done", block: "Blocked" };
@@ -116,6 +117,8 @@ function Board({ onAuthors }: { onAuthors: (dir: Record<string, string>) => void
   const act = useOps();
   const decide = useDecide();
   const toolInput = useToolInput<Record<string, string>>();
+  // Presented (`present: <job>`): what Jamie shows a call. It follows that job's writes (lib/present.ts).
+  const present = typeof toolInput?.["present"] === "string" && toolInput["present"] ? toolInput["present"] : null;
   const host = useHost();
   // The canvas always opens on the home map (the Board's rule): where the viewer was is not restored.
   // Earlier versions kept it in app state ("board", "camera"); an open clears those keys.
@@ -531,6 +534,11 @@ function Board({ onAuthors }: { onAuthors: (dir: Record<string, string>) => void
     }
     goTo(h.id);
   };
+  const presenter = usePresenter(present, base, b);
+  useEffect(() => {
+    if (presenter.target) goTo(presenter.target.id);
+  }, [presenter.target]);
+
   // A deep link opens where it points: `at` (or ref / node / canvas) is a card, `roadmap` an initiative;
   // `view: brainstorm` opens that initiative's brainstorm tree, and `ask` a question on it, opened.
   const linked = useRef(false);
@@ -553,7 +561,7 @@ function Board({ onAuthors }: { onAuthors: (dir: Record<string, string>) => void
     const ids = [...Object.keys(base.cards), ...Object.values(b.asks).filter((q) => q.root && q.about).map((q) => q.id)];
     const was = seen.current;
     seen.current = new Set(ids);
-    if (!was) return;
+    if (!was || present) return;
     const fresh = ids.filter((id) => !was.has(id) && id !== picked);
     const theirs = fresh.filter((id) => (base.cards[id]?.by ?? b.asks[id]?.by) !== "person");
     if (!theirs.length) return;
@@ -668,7 +676,7 @@ function Board({ onAuthors }: { onAuthors: (dir: Record<string, string>) => void
 
   return (
     <div
-      className="sb"
+      className={`sb${present ? " sb-present" : ""}`}
       ref={desk}
       onPointerDown={onDown}
       onContextMenu={onContext}
@@ -679,6 +687,7 @@ function Board({ onAuthors }: { onAuthors: (dir: Record<string, string>) => void
         e.currentTarget.scrollLeft = 0;
       }}
     >
+      {present && <div className="sb-present-line">{presenter.line ?? "Taking notes"}</div>}
       <div className={`sb-world${dimmed ? " sb-trace" : ""}`} ref={world} onTransitionEnd={drawThreads}>
         {think && tree && plan && b ? (
           <ThinkTree
@@ -740,7 +749,7 @@ function Board({ onAuthors }: { onAuthors: (dir: Record<string, string>) => void
               </>
             )}
             {Object.entries(layout.spots).map(([id, s]) => {
-              const on = picked === id ? " sb-on" : "";
+              const on = (picked === id ? " sb-on" : "") + (presenter.fresh.has(id) ? " sb-fresh" : "");
               if (id === BRAINSTORM_SPOT && b && goal) {
                 const open = shelf.filter((q) => b.asks[q]!.open).length;
                 const decided = shelf.length - open;

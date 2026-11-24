@@ -298,7 +298,7 @@ describe("stadeum/canvas", () => {
   });
 
   it("ships its pages", async () => {
-    for (const name of ["Canvas Planning", "Brainstorm", "Brainstorm Method", "Brainstorm Framing"]) {
+    for (const name of ["Canvas Planning", "Brainstorm", "Brainstorm Method", "Brainstorm Framing", "Call Canvas"]) {
       const text = await readFile(join(HERE, "concepts", `${name}.md`), "utf8");
       assert.match(text, new RegExp(`^---\\nname: ${name}\\n`));
       assert.doesNotMatch(text, /\bHive\b|org_id|HiveInitiative|InitiativeFeature/);
