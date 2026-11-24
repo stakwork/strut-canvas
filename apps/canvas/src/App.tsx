@@ -20,23 +20,23 @@ import { useAppState, useHost, useToolInput } from "@strut/kit";
 import { Toaster, toast } from "sonner";
 import "./fonts.css";
 import "./board.css";
-import { useBrainstorms, useCardWork, useDecide, useLiveJobs, useOps, usePlan, usePlanWithPencils, useProposals, useWhy, useWork, type CardJob } from "./lib/read";
+import { useBrainstorms, useCanvasFeed, useCardWork, useDecide, useLiveJobs, useOps, usePlan, usePlanWithPencils, useProposals, useWhy, useWork, type CardJob } from "./lib/read";
 import { addRequest, goalOf, PLAN, mapGoals, openingGoals, progress, type Card, type Plan, type Role, type State } from "./lib/plan";
 import { CardFacts } from "./components/Details";
 import { asksIn, jobsByCard, openByGoal } from "./lib/brainstorm";
 import { fontOf } from "./lib/font";
 import { authorOf, directoryOf } from "./lib/author";
 import { AuthorDirectory, Byline } from "./components/Byline";
-import { boundsOf, BRAINSTORM_SPOT, goalMap, homeMap, type MapLayout } from "./lib/map";
+import { boundsOf, BRAINSTORM_SPOT, CARD_W, GROUP_W, goalMap, homeMap, TILE_H, TILE_W, type MapLayout } from "./lib/map";
 import { JamieDock } from "./components/Jamie";
 import { WhySheet, type Trace } from "./components/WhySheet";
 import { ThinkTree } from "./components/ThinkTree";
 import { asksAbove, subtreeBox, thinkTree, type Show } from "./lib/thinktree";
-import { useTrees } from "./lib/read";
 import { BuildPanel } from "./components/Build";
 import { Palette } from "./components/Palette";
 import { workFor } from "./lib/why";
 import { usePresenter } from "./lib/present";
+import { whyPlace } from "./lib/follow";
 import type { Hit } from "./lib/search";
 
 const STATE_WORD: Record<State, string> = { idle: "Not started", prog: "In progress", done: "Done", block: "Blocked" };
@@ -94,12 +94,14 @@ export default function App() {
 }
 
 function Board({ onAuthors }: { onAuthors: (dir: Record<string, string>) => void }) {
-  const { data, error, isLoading } = usePlan();
+  // One graph change feed for every read (lib/feed.ts): a page has only so many connections to the server.
+  const revs = useCanvasFeed();
+  const { data, error, isLoading } = usePlan(revs.plan);
   const proposals = useProposals().data;
   const { plan, about: proposalAbout } = usePlanWithPencils(data?.plan, proposals?.records);
   const base = data?.plan;
-  const b = useBrainstorms(base).data;
-  const why = useWhy(base).data;
+  const b = useBrainstorms(base, revs.brainstorm).data;
+  const why = useWhy(base, revs.why).data;
   const authorDir = useMemo(
     () =>
       directoryOf([
@@ -143,7 +145,7 @@ function Board({ onAuthors }: { onAuthors: (dir: Record<string, string>) => void
   const [trace, setTrace] = useState<Trace>({ story: null, requirement: null });
 
   const goal = plan && where !== HOME && plan.cards[where]?.role === "goal" ? where : null;
-  const work = useWork(base, goal).data;
+  const work = useWork(base, goal, revs.plan).data;
   const opening = useMemo(() => (plan ? openingGoals(plan) : []), [plan]);
   const all = useMemo(() => (plan ? mapGoals(plan) : []), [plan]);
   const shown = useMemo(() => (plan ? (everything ? all : opening) : []), [plan, everything, opening, all]);
@@ -160,8 +162,6 @@ function Board({ onAuthors }: { onAuthors: (dir: Record<string, string>) => void
   const [showAsks, setShowAsks] = useState<Show>("all");
   const [sizes, setSizes] = useState<Record<string, number>>({});
   const tree = useMemo(() => (think && plan && b && goal ? thinkTree(plan, b, goal, { folded, expanded, show: showAsks, sizes }) : null), [think, plan, b, goal, folded, expanded, showAsks, sizes]);
-  const opened = useMemo(() => (tree ? [...expanded].filter((id) => tree.nodes[id]) : []), [tree, expanded]);
-  const trees = useTrees(opened);
   const boardKey = goal ?? HOME;
   const layout: MapLayout | null = mapped;
   const openAsks = useMemo(() => (plan && b ? openByGoal(plan, b) : {}), [plan, b]);
@@ -237,8 +237,10 @@ function Board({ onAuthors }: { onAuthors: (dir: Record<string, string>) => void
     },
     [drawThreads],
   );
-  // A panel docked on the left (the Why sheet, or Jamie) covers that much of the desk.
+  // A panel docked on the left (the Why sheet, or Jamie) covers that much of the desk; a picked card's details,
+  // docked on the right, this much. The camera keeps what it frames clear of both.
   const inset = sheet || chat ? 444 : 0;
+  const right = !present && plan && picked && plan.cards[picked] ? 344 : 0;
 
   const fit = useCallback(
     (fly = false) => {
@@ -250,12 +252,12 @@ function Board({ onAuthors }: { onAuthors: (dir: Record<string, string>) => void
       const w = box.x1 - box.x0 + 80;
       const h = box.y1 - box.y0 + 190;
       // A goal's road can be long: open readable at its start, not shrunk to a line.
-      const room = Math.max(240, r.width - inset);
+      const room = Math.max(240, r.width - inset - right);
       const z = Math.max(think ? 0.62 : goal ? 0.55 : 0.16, Math.min(1, room / w, r.height / h));
       cam.current = { z, x: inset + (w * z > room ? 16 : (room - w * z) / 2) - (box.x0 - 40) * z, y: (h * z > r.height ? (think ? 116 : 70) : (r.height - h * z) / 2 + 20) - (box.y0 - 40) * z };
       apply(fly);
     },
-    [layout, goal, apply, inset, think, tree],
+    [layout, goal, apply, inset, right, think, tree],
   );
   // A new board, or more of it shown: frame it. Brainstorms arriving on the shelf do not move the camera.
   const framed = useRef("");
@@ -273,22 +275,22 @@ function Board({ onAuthors }: { onAuthors: (dir: Record<string, string>) => void
       if (!r) return;
       const c = cam.current;
       // Zoom out only as far as the box's width needs (never below 0.5), about the window's middle.
-      const z = Math.max(0.5, Math.min(c.z, (r.width - inset - 60) / (box.x1 - box.x0 + 40)));
+      const z = Math.max(0.5, Math.min(c.z, (r.width - inset - right - 60) / (box.x1 - box.x0 + 40)));
       let x = c.x * (z / c.z) + (r.width / 2) * (1 - z / c.z);
       let y = c.y * (z / c.z) + (r.height / 2) * (1 - z / c.z);
       const left = inset + 24;
-      const right = r.width - 24;
+      const edge = r.width - right - 24;
       const top = 110;
       const bottom = r.height - 110;
       // Right edge into view, then the left edge wins; the same for the bottom, then the top.
-      if (box.x1 * z + x > right) x -= box.x1 * z + x - right;
+      if (box.x1 * z + x > edge) x -= box.x1 * z + x - edge;
       if (box.x0 * z + x < left) x += left - (box.x0 * z + x);
       if (box.y1 * z + y > bottom) y -= box.y1 * z + y - bottom;
       if (box.y0 * z + y < top) y += top - (box.y0 * z + y);
       cam.current = { x, y, z };
       apply(fly);
     },
-    [apply, inset],
+    [apply, inset, right],
   );
   /** A question to bring into view once the tree has drawn it opened. */
   const revealAsk = useRef<string | null>(null);
@@ -335,18 +337,37 @@ function Board({ onAuthors }: { onAuthors: (dir: Record<string, string>) => void
     });
   };
 
-  /** Bring a card to the middle of the window. */
+  /** Bring a card to the middle of the window: of what the panels leave clear, with its details open beside it. */
   const flyTo = useCallback(
     (id: string) => {
       const s = layout?.spots[id];
       const r = desk.current?.getBoundingClientRect();
       if (!s || !r) return;
       const z = Math.max(cam.current.z, 0.75);
-      cam.current = { z, x: r.width / 2 - (s.x + 120) * z, y: r.height / 2 - (s.y + 50) * z };
+      const clear = present ? 0 : 344;
+      cam.current = { z, x: inset + (r.width - inset - clear) / 2 - (s.x + 120) * z, y: r.height / 2 - (s.y + 50) * z };
       apply(true);
     },
-    [layout, apply],
+    [layout, apply, inset, present],
   );
+  /** Where a card sits on the map, as a box of the world. */
+  const spotBox = (id: string) => {
+    const s = layout?.spots[id];
+    const role = plan?.cards[id]?.role;
+    if (!s || !role) return null;
+    const w = role === "work" ? TILE_W : role === "group" ? GROUP_W : CARD_W;
+    return { x0: s.x, y0: s.y, x1: s.x + w, y1: s.y + (role === "work" ? TILE_H : 110) };
+  };
+  // A card picked where its own details would cover it is brought out from under them.
+  useLayoutEffect(() => {
+    if (!picked || !right || think) return;
+    const box = spotBox(picked);
+    const r = desk.current?.getBoundingClientRect();
+    if (!box || !r) return;
+    const c = cam.current;
+    if (box.x1 * c.z + c.x <= r.width - right - 12 && box.x0 * c.z + c.x >= inset + 12) return;
+    reveal(box);
+  }, [picked, right]);
 
   const zoomAt = useCallback(
     (factor: number, cx: number, cy: number) => {
@@ -534,9 +555,24 @@ function Board({ onAuthors }: { onAuthors: (dir: Record<string, string>) => void
     }
     goTo(h.id);
   };
-  const presenter = usePresenter(present, base, b);
+  const presenter = usePresenter(present, base, b, why);
   useEffect(() => {
-    if (presenter.target) goTo(presenter.target.id);
+    const t = presenter.target;
+    if (!t) return;
+    // A brief, story or requirement shows on its initiative's Why sheet, its story opened; anything else on the map
+    // or the brainstorm tree.
+    const w = why ? whyPlace(t.id, why) : null;
+    if (w) {
+      if (w.goal !== goal) open(w.goal);
+      setMode("map");
+      setSheet(true);
+      setTrace({ story: w.story, requirement: w.requirement });
+      return;
+    }
+    setSheet(false);
+    goTo(t.id);
+    // Every question the job just wrote is shown open: the call sees the options people named.
+    if (b?.asks[t.id]) setExpanded((e) => new Set([...e, ...[...presenter.fresh].filter((id) => b.asks[id])]));
   }, [presenter.target]);
 
   // A deep link opens where it points: `at` (or ref / node / canvas) is a card, `roadmap` an initiative;
@@ -555,7 +591,9 @@ function Board({ onAuthors }: { onAuthors: (dir: Record<string, string>) => void
   }, [toolInput, plan, b]);
 
   // New cards a job (or anyone else) wrote: a toast says so, with a way to go there. The first read is what was already there.
+  // A burst of writes (a job writing a whole plan) is one toast that counts up, not one per read.
   const seen = useRef<Set<string> | null>(null);
+  const burst = useRef<{ ids: string[]; until: number }>({ ids: [], until: 0 });
   useEffect(() => {
     if (!base || !b) return;
     const ids = [...Object.keys(base.cards), ...Object.values(b.asks).filter((q) => q.root && q.about).map((q) => q.id)];
@@ -563,13 +601,17 @@ function Board({ onAuthors }: { onAuthors: (dir: Record<string, string>) => void
     seen.current = new Set(ids);
     if (!was || present) return;
     const fresh = ids.filter((id) => !was.has(id) && id !== picked);
-    const theirs = fresh.filter((id) => (base.cards[id]?.by ?? b.asks[id]?.by) !== "person");
-    if (!theirs.length) return;
+    const fresh2 = fresh.filter((id) => (base.cards[id]?.by ?? b.asks[id]?.by) !== "person");
+    if (!fresh2.length) return;
+    const now = Date.now();
+    const kept = now < burst.current.until ? burst.current.ids.filter((id) => base.cards[id] || b.asks[id]) : [];
+    const theirs = [...kept, ...fresh2.filter((id) => !kept.includes(id))];
+    burst.current = { ids: theirs, until: now + 15_000 };
     const first = theirs[0]!;
     const name = (id: string) => base.cards[id]?.title ?? b.asks[id]?.text ?? "";
     const kind = base.cards[first] ? ROLE_WORD[base.cards[first]!.role].toLowerCase() : "brainstorm";
     toast(theirs.length === 1 ? `New ${kind} on the canvas` : `${theirs.length} new cards on the canvas`, {
-      id: `new:${first}`,
+      id: "new-cards",
       duration: 15_000,
       description: theirs.slice(0, 3).map(name).filter(Boolean).join(" · "),
       action: { label: "Show me", onClick: () => goTo(first) },
@@ -651,13 +693,15 @@ function Board({ onAuthors }: { onAuthors: (dir: Record<string, string>) => void
   // What Jamie is told the person is looking at, with ids it can act on.
   const name = (id: string) => `the ${ROLE_WORD[plan!.cards[id]!.role].toLowerCase()} "${plan!.cards[id]!.title}" (ref_id ${id})`;
   const subject = pickedCard && !pickedCard.pencil ? pickedCard.id : pickedAsk?.about && plan?.cards[pickedAsk.about] ? pickedAsk.about : null;
+  // Said even before the plan is read: a turn sent then is still about the canvas.
+  const canvasJob = `Plan changes and brainstorms on these cards are a Canvas Planning job, written with the \`stadeum/canvas/canvas\` workflow (a brainstorm about a card is a Question about its ref_id).`;
   const about = !plan
-    ? ""
+    ? `On the Infinite Canvas: on the map of every initiative, nothing picked. ${canvasJob}`
     : `On the Infinite Canvas: ${
         [pickedAsk ? `looking at the brainstorm question "${pickedAsk.text}" (ref_id ${pickedAsk.id})${subject ? ` about ${name(subject)}` : ""}` : subject ? `looking at ${name(subject)}` : "", goal && goal !== subject ? `in ${name(goal)}` : !goal && !subject ? "on the map of every initiative, nothing picked" : ""]
           .filter(Boolean)
           .join(", ")
-      }. "This" and "it" mean ${pickedAsk ? `the question ${pickedAsk.id}` : subject ? `ref_id ${subject}` : "nothing in particular"}. Plan changes and brainstorms on these cards are a Canvas Planning job, written with the \`stadeum/canvas/canvas\` workflow (a brainstorm about a card is a Question about its ref_id).`;
+      }. "This" and "it" mean ${pickedAsk ? `the question ${pickedAsk.id}` : subject ? `ref_id ${subject}` : "nothing in particular"}. ${canvasJob}`;
   const subjectTitle = pickedAsk ? pickedAsk.text : pickedCard ? pickedCard.title : null;
   const decideOne = async (id: string, action: "accept" | "reject") => {
     const t = toast.loading(action === "accept" ? "Accepting" : "Rejecting");
@@ -694,8 +738,6 @@ function Board({ onAuthors }: { onAuthors: (dir: Record<string, string>) => void
             t={tree}
             plan={plan}
             b={b}
-            trees={trees.byRef}
-            loading={trees.loading}
             expanded={expanded}
             folded={folded}
             picked={picked}
@@ -1007,7 +1049,7 @@ function Board({ onAuthors }: { onAuthors: (dir: Record<string, string>) => void
             ))}
           </div>
           <i className="sb-sep" />
-          <button type="button" className="sb-btn" title="Open every question shown, with its options" onClick={() => setExpanded(new Set(tree.shownAsks))}>
+          <button type="button" className="sb-btn" title="Open every question shown, with its options" onClick={() => setExpanded(new Set(tree.everyAsk))}>
             Open all
           </button>
           <button
@@ -1031,6 +1073,7 @@ function Board({ onAuthors }: { onAuthors: (dir: Record<string, string>) => void
           goal={goal}
           trace={trace}
           serving={serving}
+          fresh={presenter.fresh}
           act={act}
           onTrace={(t) => {
             setTrace(t);
@@ -1185,7 +1228,7 @@ function Board({ onAuthors }: { onAuthors: (dir: Record<string, string>) => void
       {plan && !plan.goals.length && (
         <div className="sb-note">
           <h2>No initiatives yet</h2>
-          <p>Right-click the desk to add one, or ask Jamie to plan one and it will appear here.</p>
+          <p>Right-click to add one, or ask Jamie to plan one.</p>
         </div>
       )}
       {palette && plan && <Palette plan={plan} why={why ?? null} b={b ?? null} close={() => setPalette(false)} pick={pick} />}

@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { buildPlan, lastActivity, openingGoals, timeOf, type RawEdge, type RawNode } from "./plan.ts";
-import { homeMap } from "./map.ts";
+import { CARD_W, homeMap, toEdge } from "./map.ts";
 
 const DAY = 86_400_000;
 const T0 = Date.parse("2026-11-01T00:00:00Z");
@@ -53,4 +53,14 @@ test("the ring is one ring in that order, and a draft keeps its draft state", ()
   // The newest sits at the top of the ring.
   assert.ok(map.spots["draft"]!.y < map.spots["a5"]!.y);
   assert.equal(plan.cards["draft"]!.state, "idle");
+});
+
+test("a road on the home map ends at its card's edge, not under it", () => {
+  assert.deepEqual(toEdge({ x: 0, y: 0 }, { x: 0, y: 400 }), { x: 0, y: 346 });
+  assert.deepEqual(toEdge({ x: 0, y: 0 }, { x: 600, y: 0 }), { x: 600 - CARD_W / 2, y: 0 });
+  const p = buildPlan({ goal: [goal("x", "X", "ACTIVE", T0), goal("y", "Y", "ACTIVE", T0)], group: [], work: [] }, []);
+  for (const r of homeMap(p, ["x", "y"], true).roads) {
+    const spot = Object.values(homeMap(p, ["x", "y"], true).spots).find((s) => Math.abs(s.x + CARD_W / 2 - r.b.x) <= CARD_W / 2 + 1 && Math.abs(s.y + 56 - r.b.y) <= 57);
+    assert.ok(spot, `road end ${JSON.stringify(r.b)} is on a card's edge`);
+  }
 });

@@ -2,7 +2,8 @@
 //
 // The graph stamps a writer two ways:
 //  - plan cards: created_by_kind (human | jamie | strut) and author (a person's actor id, or the agent).
-//  - brainstorm cards: made_by (user | model), and for a person's words `by` (their actor id).
+//  - brainstorm cards: made_by (user | model), and for a person's words `by` (their actor id) and, when the
+//    words were said by someone the text names (a call's speaker), `speaker`: whose words they are.
 
 export interface Author {
   kind: "person" | "agent" | "unknown";
@@ -30,7 +31,7 @@ export function authorOf(p: Record<string, unknown> | undefined): Author {
   const kind = str(props["created_by_kind"]).toLowerCase();
   // A brainstorm card: made_by says whose words they are, whoever wrote the card.
   if (made === "model") return { kind: "agent", name: "Jamie" };
-  if (made && PEOPLE.has(made)) return { kind: "person", ...parseActor(props["by"]) };
+  if (made && PEOPLE.has(made)) return { kind: "person", ...parseActor(str(props["speaker"]) || props["by"]) };
   if (PEOPLE.has(kind)) return { kind: "person", ...parseActor(props["author"]) };
   if (AGENTS[kind]) return { kind: "agent", name: AGENTS[kind] };
   const by = str(props["author"]).toLowerCase();

@@ -1,7 +1,7 @@
 // The brainstorm as a tree on the canvas: the initiative, its milestones in
 // road order, the features a question is about, the questions, and — for a
 // question a person opened — its options as branches, each with the follow-up
-// questions choosing it leads to hanging under it. Read left to right, top
+// questions choosing it leads to hanging under it, then its sub-questions. Read left to right, top
 // aligned like an outline, so opening a question never moves what is above it.
 // Computed from the plan and the brainstorms (./brainstorm.ts), never stored;
 // what is folded or opened is the viewer's. Pure.
@@ -43,6 +43,8 @@ export interface ThinkLayout {
   all: Tally;
   /** The questions drawn, follow-ups included. */
   shownAsks: string[];
+  /** Every question in the trees shown, drawn or not: what "Open all" opens. */
+  everyAsk: string[];
 }
 
 export const TW: Record<TKind, number> = { goal: 264, group: 236, work: 210, ask: 300, option: 320 };
@@ -69,12 +71,22 @@ export interface ThinkOpts {
   sizes: Readonly<Record<string, number>>;
 }
 
-/** Each question's place: the option that leads to it, and each option's question. */
+/** Each question's place: the option that leads to it or the question it is under, and each option's question. */
 export function parentsOf(b: Brainstorms): Record<string, string> {
   const up: Record<string, string> = {};
   for (const q of Object.values(b.asks)) for (const o of q.options) up[o] ??= q.id;
+  for (const q of Object.values(b.asks)) for (const k of q.subs) up[k] ??= q.id;
   for (const o of Object.values(b.choices)) for (const q of o.asks) up[q] ??= o.id;
   return up;
+}
+
+/** A question and every question under it: its sub-questions, and the follow-ups its options lead to. */
+export function asksUnder(b: Brainstorms, id: string, out: string[] = []): string[] {
+  if (!b.asks[id] || out.includes(id)) return out;
+  out.push(id);
+  for (const k of b.asks[id]!.subs) asksUnder(b, k, out);
+  for (const o of b.asks[id]!.options) for (const f of b.choices[o]?.asks ?? []) asksUnder(b, f, out);
+  return out;
 }
 
 /** The chain of questions above a follow-up, nearest last (the question itself not included). */
@@ -123,7 +135,11 @@ export function thinkTree(plan: Plan, b: Brainstorms, goal: string, o: ThinkOpts
       if (o.folded.has(id)) return [];
       return [...(about[id] ?? []).map((q) => [q, "ask"] as [string, TKind]), ...features(id).map((f) => [f, "work"] as [string, TKind])];
     }
-    if (kind === "ask") return o.expanded.has(id) ? b.asks[id]!.options.filter((c) => b.choices[c]).map((c) => [c, "option"] as [string, TKind]) : [];
+    if (kind === "ask") {
+      if (!o.expanded.has(id)) return [];
+      const q = b.asks[id]!;
+      return [...q.options.filter((c) => b.choices[c]).map((c) => [c, "option"] as [string, TKind]), ...q.subs.filter((k) => b.asks[k]).map((k) => [k, "ask"] as [string, TKind])];
+    }
     return (b.choices[id]?.asks ?? []).filter((q) => b.asks[q]).map((q) => [q, "ask"] as [string, TKind]);
   };
   const textOf = (id: string, kind: TKind) => (kind === "ask" ? b.asks[id]!.text : kind === "option" ? b.choices[id]!.text : plan.cards[id]?.title ?? "");
@@ -167,7 +183,9 @@ export function thinkTree(plan: Plan, b: Brainstorms, goal: string, o: ThinkOpts
 
   const list = Object.values(nodes);
   const box = list.length ? { x0: Math.min(...list.map((n) => n.x)), y0: Math.min(...list.map((n) => n.y)), x1: Math.max(...list.map((n) => n.x + n.w)), y1: Math.max(...list.map((n) => n.y + n.h)) } : null;
-  return { nodes, order, edges, box, tally, all, shownAsks };
+  const everyAsk: string[] = [];
+  for (const list of Object.values(about)) for (const id of list) asksUnder(b, id, everyAsk);
+  return { nodes, order, edges, box, tally, all, shownAsks, everyAsk };
 }
 
 function edgeKind(b: Brainstorms, _from: string, fromKind: TKind, to: string, toKind: TKind): TEdge["kind"] {

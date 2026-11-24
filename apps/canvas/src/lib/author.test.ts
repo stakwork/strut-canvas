@@ -22,6 +22,11 @@ test("brainstorm cards: made_by wins over who wrote the card", () => {
   assert.equal(authorName(authorOf({ made_by: "model", author: "jamie" })), "Jamie");
 });
 
+test("a person's words said on a call show who said them, not who ran the job", () => {
+  assert.equal(authorName(authorOf({ made_by: "user", by: "evan", speaker: "Cleo" })), "Cleo");
+  assert.equal(authorName(authorOf({ made_by: "user", by: "evan", speaker: " " })), "evan");
+});
+
 test("no stamp: nothing to say", () => {
   assert.equal(authorName(authorOf({})), null);
 });

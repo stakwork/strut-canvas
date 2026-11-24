@@ -5,7 +5,7 @@
 // change is one `ops` run, as in the rest of the canvas.
 import { useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 type Sty = { n: TNode; style: CSSProperties };
-import type { Brainstorms, TreeNode } from "../lib/brainstorm";
+import type { Brainstorms } from "../lib/brainstorm";
 import type { Plan } from "../lib/plan";
 import type { ThinkLayout, TNode } from "../lib/thinktree";
 import { Editable, type Act } from "./Details";
@@ -18,8 +18,6 @@ interface Props {
   t: ThinkLayout;
   plan: Plan;
   b: Brainstorms;
-  trees: Map<string, TreeNode>;
-  loading: Set<string>;
   expanded: ReadonlySet<string>;
   folded: ReadonlySet<string>;
   picked: string | null;
@@ -132,13 +130,17 @@ function PlanNode({ n, style, plan, t, folded, onToggleFold }: Props & Sty) {
   );
 }
 
-function AskNode({ n, style, b, picked, expanded, loading, act, onToggleAsk, onAsk }: Props & Sty) {
+/** "4 options", "2 questions", "4 options, 2 questions". */
+const under = (options: number, subs: number) =>
+  [options ? `${options} option${options === 1 ? "" : "s"}` : "", subs ? `${subs} question${subs === 1 ? "" : "s"}` : ""].filter(Boolean).join(", ");
+
+function AskNode({ n, style, b, picked, expanded, act, onToggleAsk, onAsk }: Props & Sty) {
   const q = b.asks[n.id]!;
   const open = expanded.has(n.id);
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState(false);
   const chosen = q.options.map((c) => b.choices[c]).find((c) => c?.state === "chosen");
-  const follow = !q.root;
+  const follow = q.follows;
   const note = q.hand && !q.options.length;
   return (
     <div data-tnode={n.id} data-id={n.id} className={`bt-node bt-ask ${q.open ? "bt-open" : "bt-decided"}${follow ? " bt-follow" : ""}${q.hand ? " ic-person" : ""}${picked === n.id ? " sb-on" : ""}`} style={style}>
@@ -147,9 +149,14 @@ function AskNode({ n, style, b, picked, expanded, loading, act, onToggleAsk, onA
           <i className={`bt-flag ${q.open ? "bt-flag-open" : "bt-flag-done"}`} />
           {follow ? "Follow-up · " : note ? "Note · " : "Question · "}
           {q.open ? "Open" : "Decided"}
-          {q.options.length > 0 && ` · ${q.options.length} option${q.options.length === 1 ? "" : "s"}`}
+          {(q.options.length > 0 || q.subs.length > 0) && ` · ${under(q.options.length, q.subs.length)}`}
         </span>
-        {!editing && <span className={`bt-q${q.hand ? " ic-hand" : ""}`}>{q.text}</span>}
+        {!editing && (
+          <span className={`bt-q${q.hand ? " ic-hand" : ""}`}>
+            {q.label ? <b className="ic-letter">{q.label}</b> : null}
+            {q.text}
+          </span>
+        )}
         {chosen && (
           <span className="bt-chosen-line">
             ✓ <span>{chosen.text}</span>
@@ -157,13 +164,12 @@ function AskNode({ n, style, b, picked, expanded, loading, act, onToggleAsk, onA
         )}
         <span className="bt-row">
           <Byline author={q.author} prefix="" className="bt-by" />
-          <span className="bt-fold">{q.options.length ? (open ? "▾ hide options" : `▸ ${q.options.length} option${q.options.length === 1 ? "" : "s"}`) : open ? "▾" : "▸ add options"}</span>
+          <span className="bt-fold">{q.options.length || q.subs.length ? (open ? `▾ hide ${q.options.length ? "options" : "questions"}` : `▸ ${under(q.options.length, q.subs.length)}`) : open ? "▾" : "▸ add options"}</span>
         </span>
       </button>
       {editing && <Editable hand={q.hand} long className="sb-edit-title" label="Question" value={q.text} placeholder="Untitled question" onSave={(text) => (setEditing(false), text && text !== q.text && void act({ op: "edit", ref_id: q.id, field: "text", value: text }, "Saving the question"))} />}
       {open && (
         <div className="bt-tools">
-          {loading.has(n.id) && <span className="bt-none">Reading options…</span>}
           {adding ? (
             <Editable
               hand
@@ -199,24 +205,23 @@ function AskNode({ n, style, b, picked, expanded, loading, act, onToggleAsk, onA
   );
 }
 
-function OptionNode({ n, style, b, trees, act }: Props & Sty) {
+function OptionNode({ n, style, b, act }: Props & Sty) {
   const o = b.choices[n.id]!;
-  const d = trees.get(n.id);
-  const pros = (d?.effects ?? []).filter((e) => e.direction === "pro");
-  const cons = (d?.effects ?? []).filter((e) => e.direction !== "pro");
+  const pros = o.effects.filter((e) => e.direction === "pro");
+  const cons = o.effects.filter((e) => e.direction !== "pro");
   const pencil = o.by !== "person" && o.state === "open";
   return (
     <div data-tnode={n.id} data-id={n.id} className={`bt-node bt-opt bt-opt-${o.state}${pencil ? " bt-pencil" : ""}`} style={style}>
       {o.state === "chosen" && <span className="bt-stamp">✓ Chosen</span>}
       <strong className={o.hand ? "ic-hand" : ""}>
-        {d?.label ? <b className="ic-letter">{d.label}</b> : null}
+        {o.label ? <b className="ic-letter">{o.label}</b> : null}
         {o.text}
       </strong>
-      {d?.ratings && (
+      {o.ratings && (
         <span className="ic-rate">
-          <Pips label="Fast" score={d.ratings.fast} />
-          <Pips label="Good" score={d.ratings.good} />
-          <Pips label="Cheap" score={d.ratings.cheap} />
+          <Pips label="Fast" score={o.ratings.fast} />
+          <Pips label="Good" score={o.ratings.good} />
+          <Pips label="Cheap" score={o.ratings.cheap} />
         </span>
       )}
       {(pros.length > 0 || cons.length > 0) && (

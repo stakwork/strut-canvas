@@ -45,6 +45,19 @@ const GAP = 8;
 
 const empty = (): MapLayout => ({ spots: {}, roads: [], plots: [], rings: [], faded: [], labels: [] });
 
+/** Half a goal card's height on the home map, about. */
+const GOAL_HALF_H = 54;
+
+/** Where a road from `a` to a card centred on `c` meets the card's edge, so it ends at the card instead of running
+ *  under it (a draft or faded card is see-through). */
+export function toEdge(a: Spot, c: Spot, halfW = CARD_W / 2, halfH = GOAL_HALF_H): Spot {
+  const dx = c.x - a.x;
+  const dy = c.y - a.y;
+  const s = Math.min(dx ? halfW / Math.abs(dx) : Infinity, dy ? halfH / Math.abs(dy) : Infinity);
+  if (!Number.isFinite(s) || s >= 1) return c;
+  return { x: Math.round(c.x - dx * s), y: Math.round(c.y - dy * s) };
+}
+
 /** A note on a goal's shelf: its width, and the room each takes. */
 export const NOTE_W = 250;
 export const NOTE_STEP = 116;
@@ -65,7 +78,8 @@ export function homeMap(plan: Plan, shown: string[], oneRing = false): MapLayout
       const kids = plan.kids[g] ?? [];
       if (!kids.length) out.faded.push(g);
       const kind: State = plan.cards[g]!.state === "done" ? "done" : kids.some((m) => plan.cards[m]?.state === "prog") || plan.cards[g]!.state === "prog" ? "prog" : "idle";
-      out.roads.push({ a: { x: Math.round(Math.cos(a) * 150), y: Math.round(Math.sin(a) * 95) }, b: { x: Math.round(x), y: Math.round(y) }, kind });
+      const from = { x: Math.round(Math.cos(a) * 150), y: Math.round(Math.sin(a) * 95) };
+      out.roads.push({ a: from, b: toEdge(from, { x: Math.round(x), y: Math.round(y) }), kind });
     });
     if (take.length) out.rings.push({ rx: Math.round(radius * 1.6), ry: radius });
     return out;
@@ -86,7 +100,8 @@ export function homeMap(plan: Plan, shown: string[], oneRing = false): MapLayout
         if (k === 2) out.faded.push(g);
         if (k === 0) {
           const busy = (plan.kids[g] ?? []).some((m) => plan.cards[m]?.state === "prog");
-          out.roads.push({ a: { x: Math.round(Math.cos(a) * 150), y: Math.round(Math.sin(a) * 95) }, b: { x: Math.round(x), y: Math.round(y) }, kind: busy ? "prog" : "idle" });
+          const from = { x: Math.round(Math.cos(a) * 150), y: Math.round(Math.sin(a) * 95) };
+          out.roads.push({ a: from, b: toEdge(from, { x: Math.round(x), y: Math.round(y) }), kind: busy ? "prog" : "idle" });
         }
       });
       out.rings.push({ rx: Math.round(radius * 1.6), ry: radius });

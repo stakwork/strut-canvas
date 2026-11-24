@@ -1,17 +1,20 @@
 // Every read and write the page makes, on the app's grants (app.yaml).
 // Reads: every node of the plan's types with `graph/find`, a page at a time,
 // then the edges among them with `graph/graph-edges`, re-read (throttled)
-// when the graph change feed says one of those types was written. Writes:
-// one `ops` run per change, as the viewer — the workflow checks the
-// status values, stamps who wrote it and soft-deletes with undo.
+// when the page's one graph change feed (./feed.ts) says one of those types
+// was written. Writes: one `ops` run per change, as the viewer — the
+// workflow checks the status values, stamps who wrote it and soft-deletes
+// with undo — drawn the moment it is made (./optimistic.ts).
 import { useEffect, useRef, useState } from "react";
-import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueries, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useGraphChanges, useStrutClient, type StrutClient } from "@strut/kit";
 import { toast } from "sonner";
 import { buildPlan, PLAN, withPencils, type OpsInput, type Plan, type RawEdge, type RawNode, type Role, type Roles } from "./plan";
-import { buildBrainstorms, BRAINSTORM, type BrainstormRoles, type Brainstorms, type TreeNode } from "./brainstorm";
+import { buildBrainstorms, BRAINSTORM, EFFECT, type BrainstormRoles, type Brainstorms } from "./brainstorm";
 import { buildWhy, WHY, type Why, type WhyRoles } from "./why";
 import { PLAN_STEPS, planProposals, type ProposalRecord } from "./proposals";
+import { bump, FEED_TYPES, readsTouched, type Revs } from "./feed";
+import { patchBrainstorms, patchPlan, patchWhy } from "./optimistic";
 
 const FIND = "graph/find";
 /** graph/find's largest page. */
@@ -46,14 +49,22 @@ async function findAll(client: StrutClient, type: string): Promise<{ nodes: RawN
   return { nodes, truncated: false };
 }
 
+/** The edges among `ids`, and from them to `among`. Read a thousand ids at a time: an edge between two ids read in
+ *  different batches is found because the rest of `ids` go along as `among`. */
 async function edgesOf(client: StrutClient, ids: string[], among: string[]): Promise<{ edges: RawEdge[]; truncated: boolean }> {
   const edges: RawEdge[] = [];
+  const seen = new Set<string>();
   let truncated = false;
-  const others = among.slice(0, AMONG);
-  if (among.length > AMONG) truncated = true;
   for (let i = 0; i < ids.length; i += EDGES_IDS) {
-    const r = await client.run<{ edges?: RawEdge[]; truncated?: boolean }>("graph/graph-edges", { ref_ids: ids.slice(i, i + EDGES_IDS), among: others });
-    edges.push(...(r.edges ?? []));
+    const batch = ids.slice(i, i + EDGES_IDS);
+    const rest = ids.length > EDGES_IDS ? [...ids.slice(0, i), ...ids.slice(i + EDGES_IDS)] : [];
+    const all = [...among, ...rest];
+    if (all.length > AMONG) truncated = true;
+    const r = await client.run<{ edges?: RawEdge[]; truncated?: boolean }>("graph/graph-edges", { ref_ids: batch, among: all.slice(0, AMONG) });
+    for (const e of r.edges ?? []) {
+      const k = `${e.source}|${e.edge_type}|${e.target}`;
+      if (!seen.has(k)) (seen.add(k), edges.push(e));
+    }
     if (r.truncated) truncated = true;
   }
   return { edges, truncated };
@@ -77,10 +88,20 @@ export function useSettled(rev: number, ms: number): number {
   return settled;
 }
 
-/** The change feed's counter for some types, whichever shape this kit answers in. */
-function useRev(types: string[]): number {
-  const g: unknown = useGraphChanges(types);
-  return typeof g === "number" ? g : Number((g as { rev?: number } | null)?.rev ?? 0);
+/** How often each read may be read again while writes keep landing: the first write shows at once, the rest
+ *  together when the interval ends. A job writing a plan lands a card every few hundred ms. */
+const SETTLE_MS = 2_000;
+
+/** The page's one graph change feed (./feed.ts): a counter per read, moved when a write of its types lands. */
+export function useCanvasFeed(): Revs {
+  const g: unknown = useGraphChanges(FEED_TYPES);
+  const rev = typeof g === "number" ? g : Number((g as { rev?: number } | null)?.rev ?? 0);
+  const changes = typeof g === "object" && g ? ((g as { changes?: Array<{ node_type?: string; types?: string[] }> }).changes ?? []) : [];
+  const [revs, setRevs] = useState<Revs>({ plan: 0, brainstorm: 0, why: 0 });
+  useEffect(() => {
+    if (rev) setRevs((r) => bump(r, readsTouched(changes)));
+  }, [rev]);
+  return revs;
 }
 
 export async function readPlan(client: StrutClient, roles: Roles = PLAN): Promise<{ plan: Plan; truncated: boolean }> {
@@ -92,9 +113,9 @@ export async function readPlan(client: StrutClient, roles: Roles = PLAN): Promis
 }
 
 /** The plan, re-read when a write to one of its types lands, at most every few seconds. */
-export function usePlan(roles: Roles = PLAN) {
+export function usePlan(feed: number, roles: Roles = PLAN) {
   const client = useStrutClient();
-  const rev = useSettled(useRev([roles.goal, roles.group, roles.work]), 5_000);
+  const rev = useSettled(feed, SETTLE_MS);
   return useQuery({
     queryKey: ["ic", "plan", roles.goal, roles.group, roles.work, rev],
     queryFn: () => readPlan(client, roles),
@@ -106,17 +127,18 @@ export function usePlan(roles: Roles = PLAN) {
 const liveIds = (plan: Plan) => Object.keys(plan.cards).filter((id) => !plan.cards[id]!.pencil);
 
 export async function readBrainstorms(client: StrutClient, plan: Plan, roles: BrainstormRoles = BRAINSTORM): Promise<Brainstorms> {
-  const [questions, options] = await Promise.all([findAll(client, roles.question), findAll(client, roles.option)]);
-  const own = [...questions.nodes, ...options.nodes].map((n) => n.ref_id);
+  // Every question and option, and every option's effects: the whole of every tree in one read.
+  const [questions, options, effects] = await Promise.all([findAll(client, roles.question), findAll(client, roles.option), findAll(client, EFFECT.type)]);
+  const own = [...questions.nodes, ...options.nodes, ...effects.nodes].map((n) => n.ref_id);
   // A question's edge to the card it is about leads out of the brainstorm, into the plan.
   const { edges } = await edgesOf(client, own, liveIds(plan));
-  return buildBrainstorms(questions.nodes, options.nodes, edges, plan, roles);
+  return buildBrainstorms(questions.nodes, options.nodes, edges, plan, roles, effects.nodes);
 }
 
 /** The brainstorms about the plan's cards, read once the plan is, and again when one is written. */
-export function useBrainstorms(plan: Plan | undefined, roles: BrainstormRoles = BRAINSTORM) {
+export function useBrainstorms(plan: Plan | undefined, feed: number, roles: BrainstormRoles = BRAINSTORM) {
   const client = useStrutClient();
-  const rev = useSettled(useRev([roles.question, roles.option]), 10_000);
+  const rev = useSettled(feed, SETTLE_MS);
   return useQuery({
     queryKey: ["ic", "brainstorms", roles.question, roles.option, rev, plan ? Object.keys(plan.cards).length : 0],
     enabled: !!plan,
@@ -124,40 +146,6 @@ export function useBrainstorms(plan: Plan | undefined, roles: BrainstormRoles = 
     staleTime: 60_000,
     placeholderData: (prev) => prev,
   });
-}
-
-/** One brainstorm's whole tree — options with their ratings, pros and cons — for the question picked. */
-export function useTree(root: string | null) {
-  const client = useStrutClient();
-  const rev = useSettled(useRev([BRAINSTORM.question, BRAINSTORM.option]), 5_000);
-  return useQuery({
-    queryKey: ["ic", "tree", root, rev],
-    enabled: !!root,
-    queryFn: () => client.run<{ nodes: TreeNode[] }>("stadeum/canvas/brainstorm-tree", { root: root! }),
-    staleTime: 30_000,
-    placeholderData: (prev) => prev,
-  });
-}
-
-/** The trees of the questions opened on the brainstorm tree, one `canvas/brainstorm-tree` read each, merged by ref_id. */
-export function useTrees(roots: string[]): { byRef: Map<string, TreeNode>; loading: Set<string> } {
-  const client = useStrutClient();
-  const rev = useSettled(useRev([BRAINSTORM.question, BRAINSTORM.option]), 5_000);
-  const results = useQueries({
-    queries: roots.map((root) => ({
-      queryKey: ["ic", "tree", root, rev],
-      queryFn: () => client.run<{ nodes: TreeNode[] }>("stadeum/canvas/brainstorm-tree", { root }).catch(() => ({ nodes: [] as TreeNode[] })),
-      staleTime: 30_000,
-      placeholderData: (prev: { nodes: TreeNode[] } | undefined) => prev,
-    })),
-  });
-  const byRef = new Map<string, TreeNode>();
-  const loading = new Set<string>();
-  results.forEach((r, i) => {
-    if (!r.data) loading.add(roots[i]!);
-    for (const n of r.data?.nodes ?? []) if (!byRef.has(n.ref_id) || n.kind === "option") byRef.set(n.ref_id, n);
-  });
-  return { byRef, loading };
 }
 
 export async function readWhy(client: StrutClient, plan: Plan, roles: WhyRoles = WHY): Promise<Why> {
@@ -169,9 +157,9 @@ export async function readWhy(client: StrutClient, plan: Plan, roles: WhyRoles =
 }
 
 /** Each goal's brief, stories and requirements, the work that answers them, and each feature's architecture. */
-export function useWhy(plan: Plan | undefined, roles: WhyRoles = WHY) {
+export function useWhy(plan: Plan | undefined, feed: number, roles: WhyRoles = WHY) {
   const client = useStrutClient();
-  const rev = useSettled(useRev([roles.brief, roles.story, roles.requirement, roles.architecture]), 10_000);
+  const rev = useSettled(feed, SETTLE_MS);
   return useQuery({
     queryKey: ["ic", "why", rev, plan ? Object.keys(plan.cards).length : 0],
     enabled: !!plan,
@@ -203,6 +191,8 @@ export interface CardLink {
 export interface CardWork {
   state: "not_started" | "in_progress" | "done" | "blocked";
   line: string;
+  /** A job was started on it. */
+  started: boolean;
   reason?: string;
   jobs: CardJob[];
   prs: Array<{ url?: string; repo?: string | null; number?: number | null; state: string; failing: string[]; title?: string }>;
@@ -216,9 +206,9 @@ export interface Work {
 }
 
 /** The build of one goal's cards: jobs, pull requests, artifacts and linked work, read for the goal on screen only. */
-export function useWork(plan: Plan | undefined, goal: string | null) {
+export function useWork(plan: Plan | undefined, goal: string | null, feed: number) {
   const client = useStrutClient();
-  const rev = useSettled(useRev([PLAN.goal, PLAN.group, PLAN.work]), 30_000);
+  const rev = useSettled(feed, 30_000);
   const features = plan && goal ? collect(plan, goal).filter((id) => plan.cards[id]!.role === "work") : [];
   const also = plan && goal ? collect(plan, goal).filter((id) => plan.cards[id]!.role !== "work") : [];
   const q = useQuery({
@@ -319,18 +309,85 @@ export async function runToEnd(client: StrutClient, workflow: string, input: Rec
 /** A failed write's reason, without the step's own prefix. */
 const reason = (err: unknown) => (err instanceof Error ? err.message : String(err)).replace(/^stadeum\/canvas\/op:\s*/, "");
 
-/** A person's change, one `ops` run each: a toast while it runs, the reason when it is refused, Undo after a delete.
- *  Resolves to the run's output, or null when it did not happen. */
+/** The reads of the graph: what a write may change. The viewer's jobs, proposals and Jamie's turns are not. */
+const GRAPH_READS: ReadonlySet<string> = new Set(["plan", "brainstorms", "why", "tree", "work", "card-work"]);
+const PLAN_READS: ReadonlySet<string> = new Set(["plan", "work", "card-work"]);
+const WHY_READS: ReadonlySet<string> = new Set(["why", "card-work"]);
+const TREE_READS: ReadonlySet<string> = new Set(["brainstorms", "tree"]);
+export const readAgain = (qc: QueryClient, reads: ReadonlySet<string> = GRAPH_READS) =>
+  qc.invalidateQueries({ predicate: (q) => q.queryKey[0] === "ic" && reads.has(String(q.queryKey[1])) });
+
+/** The reads that show some node types (a job's update says which it wrote); every read when it names none. */
+export function readsOfTypes(types: readonly string[]): ReadonlySet<string> {
+  if (!types.length) return GRAPH_READS;
+  const touched = readsTouched(types.map((t) => ({ node_type: t })));
+  return new Set([...(touched.has("plan") ? PLAN_READS : []), ...(touched.has("why") ? WHY_READS : []), ...(touched.has("brainstorm") ? TREE_READS : [])]);
+}
+
+/** The reads a person's act can change. Each read of a big canvas is a second or so on a LadybugDB file, where the
+ *  reads queue one behind another: a milestone added reads the plan again, not the brainstorms and the why too. */
+function readsFor(qc: QueryClient, input: OpsInput): ReadonlySet<string> {
+  switch (input.op) {
+    case "add":
+      return ["initiative", "milestone", "feature"].includes(input.kind ?? "") ? PLAN_READS : WHY_READS;
+    case "add_question":
+    case "add_option":
+    case "choose":
+    case "unchoose":
+      return TREE_READS;
+    case "accept":
+    case "drop":
+    case "reset":
+      return WHY_READS;
+    case "set_status":
+      return PLAN_READS;
+  }
+  const id = input.ref_id;
+  const holds = <T>(key: string, has: (d: T) => boolean) => !!id && qc.getQueriesData<T>({ queryKey: ["ic", key] }).some(([, d]) => !!d && has(d));
+  if (holds<{ plan: Plan }>("plan", (d) => !!d.plan.cards[id!])) return PLAN_READS;
+  if (holds<Why>("why", (d) => !!(d.stories[id!] || d.requirements[id!] || Object.values(d.briefId).includes(id!)))) return WHY_READS;
+  if (holds<Brainstorms>("brainstorms", (d) => !!(d.asks[id!] || d.choices[id!]))) return TREE_READS;
+  // A restore: the card is in no read yet.
+  return GRAPH_READS;
+}
+
+/** Draw a person's act on what the page last read, before the run that writes it ends (./optimistic.ts). */
+async function drawAtOnce(qc: QueryClient, input: OpsInput): Promise<boolean> {
+  let drawn = false;
+  const patch = async <T>(key: string, fn: (old: T) => T | null) => {
+    // Only a read this act changes is stopped (so it cannot land over the drawing); an add draws nothing and stops none.
+    if (!qc.getQueriesData<T>({ queryKey: ["ic", key] }).some(([, old]) => old && fn(old))) return;
+    await qc.cancelQueries({ queryKey: ["ic", key] });
+    qc.setQueriesData<T>({ queryKey: ["ic", key] }, (old) => {
+      const next = old ? fn(old) : null;
+      if (next) drawn = true;
+      return next ?? old;
+    });
+  };
+  await patch<{ plan: Plan; truncated: boolean }>("plan", (old) => {
+    const plan = patchPlan(old.plan, input);
+    return plan ? { ...old, plan } : null;
+  });
+  await patch<Why>("why", (old) => patchWhy(old, input));
+  await patch<Brainstorms>("brainstorms", (old) => patchBrainstorms(old, input));
+  return drawn;
+}
+
+/** A person's change, one `ops` run each: drawn at once where it can be, a toast while it runs, the reason when it
+ *  is refused, Undo after a delete. Resolves to the run's output, or null when it did not happen. */
 export function useOps() {
   const client = useStrutClient();
   const qc = useQueryClient();
   const act = async (input: OpsInput, label: string): Promise<Record<string, unknown> | null> => {
     const id = `ops:${Date.now()}:${Math.random()}`;
-    toast.loading(label, { id });
+    const reads = readsFor(qc, input);
+    // An act already drawn needs no toast while it runs: the card says it.
+    const drawn = await drawAtOnce(qc, input).catch(() => false);
+    if (!drawn) toast.loading(label, { id });
     try {
       const out = await runToEnd(client, "stadeum/canvas/ops", input);
       toast.dismiss(id);
-      void qc.invalidateQueries({ queryKey: ["ic"] });
+      void readAgain(qc, reads);
       if (input.op === "remove") {
         const ref = String(out["ref_id"] ?? input.ref_id);
         toast(String(out["text"] ?? "Removed."), { duration: 12_000, action: { label: "Undo", onClick: () => void act({ op: "restore", ref_id: ref }, "Restoring") } });
@@ -338,6 +395,7 @@ export function useOps() {
       return out;
     } catch (err) {
       toast.error(reason(err), { id, duration: 10_000 });
+      if (drawn) void readAgain(qc, reads);
       return null;
     }
   };
@@ -351,7 +409,8 @@ export function useDecide() {
   return async (id: string, action: "accept" | "reject"): Promise<string | null> => {
     try {
       const r = await client.run<{ status?: string; error?: string }>("proposal/decide", { id, action });
-      void qc.invalidateQueries({ queryKey: ["ic"] });
+      void readAgain(qc);
+      void qc.invalidateQueries({ queryKey: ["ic", "proposals"] });
       return r?.status === "failed" ? (r.error ?? "It failed when it ran.") : null;
     } catch (err) {
       return err instanceof Error ? err.message : String(err);

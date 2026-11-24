@@ -51,6 +51,7 @@ export function WhySheet({
   trace,
   onTrace,
   serving,
+  fresh,
   onClose,
   onScroll,
   act,
@@ -62,6 +63,8 @@ export function WhySheet({
   onTrace: (t: Trace) => void;
   /** The requirements the work picked on the map answers; null when none is picked. */
   serving: Set<string> | null;
+  /** What a presented canvas marks as just written. */
+  fresh?: ReadonlySet<string>;
   onClose: () => void;
   onScroll: () => void;
   act: Act;
@@ -106,7 +109,7 @@ export function WhySheet({
         const from = open && !serving && !trace.requirement;
         const pencil = s.status !== "accepted" && s.by !== "person";
         return (
-          <div key={id} className={`sb-story${open ? " sb-open" : ""}${lit ? " sb-story-lit" : ""}${pencil ? " sb-pencil" : ""}${fontOf("plan", s.by) === "hand" ? " ic-person" : ""}`}>
+          <div key={id} className={`sb-story${open ? " sb-open" : ""}${lit ? " sb-story-lit" : ""}${pencil ? " sb-pencil" : ""}${fontOf("plan", s.by) === "hand" ? " ic-person" : ""}${fresh?.has(id) ? " sb-fresh" : ""}`}>
             <button type="button" className="sb-story-head" aria-expanded={open} {...(from ? { "data-thread": "from" } : {})} onClick={() => onTrace({ story: id, requirement: null })}>
               {parts ? (
                 <>
@@ -141,7 +144,7 @@ export function WhySheet({
                   const on = serving ? serving.has(r) : trace.requirement === r;
                   const rp = q.status === "proposed" && q.by !== "person";
                   return (
-                    <li key={r} className={q.status === "dropped" ? "sb-dropped" : ""}>
+                    <li key={r} className={`${q.status === "dropped" ? "sb-dropped" : ""}${fresh?.has(r) ? " sb-fresh" : ""}`}>
                       <button type="button" className={`sb-req${on ? " sb-req-on" : ""}${rp ? " sb-pencil" : ""}`} {...(on ? { "data-thread": "from" } : {})} onClick={() => onTrace({ story: id, requirement: trace.requirement === r && !serving ? null : r })}>
                         <i className={`sb-dot${q.status === "accepted" ? " sb-s-done" : ""}`} />
                         <span className={`sb-req-text${fontOf("plan", q.by) === "hand" ? " ic-hand" : ""}`}>{q.text}</span>
@@ -188,7 +191,7 @@ export function WhySheet({
           </div>
         );
       })}
-      {!stories.length && <p className="sb-brief">No stories have been written for this yet. Add one, or ask Jamie to write them.</p>}
+      {!stories.length && <p className="sb-brief">No stories yet.</p>}
       <div className="sb-why-foot">
         <AddLine label="Add story" placeholder="As a …, I want …, so that …" onAdd={(text) => void act({ op: "add", kind: "story", parent: goal, text }, "Adding the story")} />
       </div>
