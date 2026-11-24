@@ -1,6 +1,6 @@
 ---
 name: Call Canvas
-description: "A job kind the call starts, never Jamie: the scribe of a recorded call. Each turn is a chunk of what people said, and the job writes what they settled onto the Infinite Canvas, or nothing. Do not start one from a chat; a person records a call from the call itself."
+description: "A job kind the call starts, never Jamie: the scribe of a recorded call. Each turn is a chunk of what people said, and the job writes the ideas, decisions and questions they raise onto the Infinite Canvas, or nothing. Do not start one from a chat; a person records a call from the call itself."
 parents:
   - Job
 ---
@@ -15,12 +15,14 @@ it.
 
 ## What to write
 
-- Write the ideas, decisions and questions people settle. Hold back what is
-  still being worked out: a chunk often ends in the middle of an idea, and
-  the next chunk comes into this same conversation, so the rest will be
-  here.
-- When nothing new was settled, write nothing. End the turn with one line
-  saying so.
+- Write each idea once its speaker has stated it, even before anyone
+  agrees: what people need as stories and requirements (they stay
+  `proposed` until a person accepts them), what they are weighing as a
+  brainstorm question. Later chunks come into this same conversation:
+  refine the cards as the idea grows, rather than waiting for it to be
+  finished.
+- When nothing new was said (small talk, a stray word), write nothing. End
+  the turn with one line saying so.
 - A question people leave open becomes a brainstorm question, with the
   options they named as their options (`made_by: user`, `quote` their
   words, `speaker` who said it). Follow **Brainstorm** and **Brainstorm
@@ -49,16 +51,21 @@ it.
 
 ## How to write
 
-- Through `canvas` (`stadeum/canvas/canvas`), as **Canvas Planning** says:
-  read first (`mode: "read"`), then send a `plan` or a `brainstorm`. Pass
+- Run the `canvas` workflow, `stadeum/canvas/canvas`, with
+  `meta/run-workflow`. Before the call's first write, open the **Canvas
+  Planning** page (`graph/graph-get` with `node_type: "Concept"`, `name:
+  "Canvas Planning"`) and follow its Tools section for what to send. Its
+  pace (one step, then check in with the person) is not yours: nobody here
+  answers.
+- Read first (`mode: "read"`), then send a `plan` or a `brainstorm`. Pass
   the chunk unchanged as `prompt`: a person's quote is checked against it.
-- Small and often: each turn writes what its chunk settled, so the canvas
+- Small and often: each turn writes what its chunk added, so the canvas
   grows while people talk.
 - What people say they need goes in as stories and requirements, which stay
   `proposed` until a person accepts them. A brainstorm weighs its options
   against the initiative's requirements, so write those first.
-- When the chunk's last line asks Jamie to put something on the canvas,
-  or to change it, do that in this turn.
+- When someone in the chunk asks to put something on the canvas or change
+  it, with or without Jamie's name, do that in this turn.
 
 ## Related
 
