@@ -9,6 +9,12 @@
  * are written here as the plans and drafts it would send.
  *
  *   STRUT_DIR=../strut npm test
+ *
+ * On Neo4j, as a Stadeum box runs it, against a throwaway server:
+ *
+ *   CANVAS_TEST_NEO4J_URI=bolt://localhost:7689 CANVAS_TEST_NEO4J_PASSWORD=… STRUT_DIR=../strut npm test
+ *
+ * It writes into the server's default namespace, so give it an empty one.
  */
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
@@ -36,6 +42,8 @@ describe("stadeum/canvas", () => {
   let strut: any, tools: any, store: any;
   let appIdentity: (name: string, version: string) => string;
   let STEP_RUN = "";
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let graph: any;
   let appVersion = "";
 
   /** A run of one of the package's workflows, as a person. Its output, or it throws with the run's error. */
@@ -66,7 +74,11 @@ describe("stadeum/canvas", () => {
     tools = await from("apps/tools.ts");
     STEP_RUN = tools.STEP_RUN_TOOL;
     appIdentity = (await from("auth.ts")).appIdentity;
-    const graph = await openGraphBackend({ kind: "ladybug", path: join(root, "graph.lbug"), namespace: PRIVATE_NAMESPACE }, { embeddings: false });
+    // A LadybugDB file, or a throwaway Neo4j when CANVAS_TEST_NEO4J_URI names one (empty it first: the suite writes into it).
+    const neo4j = process.env["CANVAS_TEST_NEO4J_URI"];
+    graph = neo4j
+      ? await openGraphBackend({ kind: "neo4j", uri: neo4j, user: "neo4j", password: process.env["CANVAS_TEST_NEO4J_PASSWORD"] ?? "", namespace: "default" }, { embeddings: false })
+      : await openGraphBackend({ kind: "ladybug", path: join(root, "graph.lbug"), namespace: PRIVATE_NAMESPACE }, { embeddings: false });
     strut = await createStrut({
       workspace: new GraphWorkspaceStore(graph, { materializeDir: join(root, "steps"), appsDir: join(root, "apps") }),
       dataDir: root,
@@ -109,6 +121,7 @@ describe("stadeum/canvas", () => {
   });
   after(async () => {
     await strut?.close?.().catch(() => {});
+    await graph?.close?.().catch(() => {});
     await rm(root, { recursive: true, force: true, maxRetries: 5 });
   });
 
