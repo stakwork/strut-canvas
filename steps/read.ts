@@ -89,31 +89,31 @@ export default defineStep({
     const names = new Map<string, any>();
     const need = new Set<string>();
     const initiative: any = { ref_id: initRef, briefs: [], stories: [], milestones: [], features: [] };
-    const briefs = await nb(initRef, "HAS_BRIEF", "forward");
-    const stories = await nb(initRef, "HAS_STORY", "forward");
-    const storyReqs: Record<string, any[]> = {};
-    for (const s of stories) storyReqs[s.ref_id] = await nb(s.ref_id, "HAS_REQUIREMENT", "forward");
-    const milestones = await nb(initRef, "HAS_MILESTONE", "forward");
-    const msFeatures: Record<string, any[]> = {};
-    for (const m of milestones) msFeatures[m.ref_id] = await nb(m.ref_id, "HAS_FEATURE", "forward");
-    const loose = await nb(initRef, "HAS_FEATURE", "forward");
+    // A level at a time, each level's reads together: a Canvas Planning job reads before every write, and an
+    // initiative with a dozen features is some forty reads.
+    const each = async <T,>(list: T[], f: (x: T) => Promise<any[]>) => Object.fromEntries(await Promise.all(list.map(async (x: any) => [x.ref_id ?? x, await f(x)])));
+    const [briefs, stories, milestones, loose] = await Promise.all([
+      nb(initRef, "HAS_BRIEF", "forward"),
+      nb(initRef, "HAS_STORY", "forward"),
+      nb(initRef, "HAS_MILESTONE", "forward"),
+      nb(initRef, "HAS_FEATURE", "forward"),
+    ]);
+    const [storyReqs, msFeatures] = await Promise.all([each(stories, (s: any) => nb(s.ref_id, "HAS_REQUIREMENT", "forward")), each(milestones, (m: any) => nb(m.ref_id, "HAS_FEATURE", "forward"))]) as [Record<string, any[]>, Record<string, any[]>];
     const allFeatures = [...Object.values(msFeatures).flat(), ...loose];
-    const featSat: Record<string, any[]> = {};
-    const featArch: Record<string, any[]> = {};
-    for (const f of allFeatures) {
-      featSat[f.ref_id] = await nb(f.ref_id, "SATISFIES", "forward");
-      featArch[f.ref_id] = await nb(f.ref_id, "HAS_ARCHITECTURE", "forward");
-    }
-    const brainstormRoots: Record<string, any[]> = {};
-    for (const [lab, ref] of [["initiative", initRef], ["milestone", msRef], ["feature", featRef]] as [string, string | undefined][]) {
-      if (ref) brainstormRoots[lab] = await nb(ref, "ABOUT", "reverse", "Question");
-    }
+    const levels = [["initiative", initRef], ["milestone", msRef], ["feature", featRef]].filter(([, ref]) => ref) as [string, string][];
+    const [featSat, featArch, roots] = await Promise.all([
+      each(allFeatures, (f: any) => nb(f.ref_id, "SATISFIES", "forward")),
+      each(allFeatures, (f: any) => nb(f.ref_id, "HAS_ARCHITECTURE", "forward")),
+      Promise.all(levels.map(async ([lab, ref]) => [lab, await nb(ref, "ABOUT", "reverse", "Question")] as const)),
+    ]) as [Record<string, any[]>, Record<string, any[]>, Array<readonly [string, any[]]>];
+    const brainstormRoots: Record<string, any[]> = Object.fromEntries(roots);
     [initRef, ...briefs.map((x) => x.ref_id), ...stories.map((x) => x.ref_id), ...Object.values(storyReqs).flat().map((x) => x.ref_id),
       ...milestones.map((x) => x.ref_id), ...allFeatures.map((x) => x.ref_id), ...Object.values(featArch).flat().map((x) => x.ref_id),
       ...Object.values(brainstormRoots).flat().map((x) => x.ref_id)].forEach((r) => need.add(r));
     const refs = [...need];
-    for (let i = 0; i < refs.length; i += 50) {
-      const b = await call(ctx, "graph/graph-get-batched", { ref_ids: refs.slice(i, i + 50) });
+    const batches = [];
+    for (let i = 0; i < refs.length; i += 50) batches.push(refs.slice(i, i + 50));
+    for (const b of await Promise.all(batches.map((ids) => call(ctx, "graph/graph-get-batched", { ref_ids: ids })))) {
       if (typeof b === "string") throw new Error(`stadeum/canvas/read: batch read failed: ${b}`);
       for (const n of (b as any).nodes ?? []) { if (n.error) throw new Error(`stadeum/canvas/read: could not read ${n.ref_id}: ${n.error}`); if (live(n.properties)) names.set(n.ref_id, slim(n)); }
     }
