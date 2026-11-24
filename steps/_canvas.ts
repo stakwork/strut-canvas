@@ -106,6 +106,35 @@ export async function initiativeNamed(ctx: any, name: string, self: string | nul
   return null;
 }
 
+/** Where a feature is built: `repo` (code in a repository, a Code Change job) or `strut` (workflows, steps or an app on this strut server, a builder job). */
+export type BuildsIn = "repo" | "strut";
+const BUILDS_IN: Record<string, BuildsIn> = {
+  repo: "repo", repository: "repo", code: "repo", git: "repo", job: "repo",
+  strut: "strut", workflow: "strut", workflows: "strut", app: "strut", step: "strut", builder: "strut",
+};
+export function normBuildsIn(raw: unknown, who = "canvas"): BuildsIn {
+  const v = BUILDS_IN[String(raw ?? "").trim().toLowerCase()];
+  if (!v) throw new Error(`${who}: builds_in is repo (code in a repository) or strut (workflows or an app on this strut server), not "${raw}". Nothing was written.`);
+  return v;
+}
+/** A list of repositories' https addresses, as an architecture holds it (JSON text). */
+export function reposOf(raw: unknown, who = "canvas"): string[] {
+  let list: unknown = raw;
+  if (typeof raw === "string") {
+    const t = raw.trim();
+    if (!t) return [];
+    try {
+      list = JSON.parse(t);
+    } catch {
+      list = t.split(/[\s,]+/);
+    }
+  }
+  if (!Array.isArray(list)) throw new Error(`${who}: repos is a list of repositories' https addresses`);
+  const out = list.map((x) => String(x).trim()).filter(Boolean);
+  for (const u of out) if (!/^https:\/\/[^\s]+$/.test(u)) throw new Error(`${who}: "${u}" is not a repository's https address`);
+  return [...new Set(out)];
+}
+
 /** Who launched the run: a person's actor id as strut gives it, never anything from the input or a model. */
 export function actorOf(ctx: unknown): string | null {
   const a = (ctx as { actor?: unknown })?.actor;

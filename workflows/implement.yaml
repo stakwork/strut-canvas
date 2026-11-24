@@ -1,10 +1,13 @@
 description: >-
-  Implement a feature: starts a Code Change job with the feature's brief (its requirements and architecture)
-  and records the job on the feature, so its card shows what the job builds. Refuses a feature with no
-  architecture. dry_run: the brief, and nothing started.
+  Implement a feature: starts the job that builds it, with the feature's brief (its requirements and
+  architecture), and records the job on the feature, so its card shows what the job builds. Where the
+  architecture says it is built picks the job: code in a repository is a Code Change job, workflows or an
+  app on this strut server a builder job. Refuses a feature with no architecture. dry_run: the brief and
+  which job, and nothing started.
 input:
   feature: { type: string, description: "The feature's ref_id" }
-  repos: { type: json, default: [], description: "Repository URLs the job works on (optional: the job finds them when empty)" }
+  builds_in: { type: string, required: false, description: "repo or strut: overrides the architecture's" }
+  repos: { type: json, required: false, description: "Repositories' https addresses (repo only): override the architecture's; none, and the job finds them" }
   dry_run: { type: boolean, default: false }
 steps:
   - id: ctx
@@ -16,6 +19,8 @@ steps:
     config:
       ctx: "{{ ctx }}"
       feature: "{{ input.feature }}"
+      builds_in: "{{ input.builds_in }}"
+      repos: "{{ input.repos }}"
   - id: gate
     type: if
     config:
@@ -27,8 +32,9 @@ steps:
     config:
       title: "{{ brief.title }}"
       prompt: "{{ brief.prompt }}"
-      kind: "Code Change"
-      repos: "{{ input.repos }}"
+      workflow: "{{ brief.workflow }}"
+      kind: "{{ brief.kind }}"
+      repos: "{{ brief.repos }}"
   - id: record
     type: job-started
     depends: start
@@ -42,5 +48,8 @@ steps:
       dry_run: "{{ input.dry_run }}"
       title: "{{ brief.title }}"
       feature: "{{ brief.feature }}"
+      builds_in: "{{ brief.builds_in }}"
+      workflow: "{{ brief.workflow }}"
+      repos: "{{ brief.repos }}"
       job: "{{ start?.job }}"
       text: "{{ input.dry_run ? 'Dry run: nothing started.' : 'Job started: ' + brief.title }}"

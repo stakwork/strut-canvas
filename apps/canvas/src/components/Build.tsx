@@ -1,8 +1,10 @@
 // Where a card's build is: the jobs on it (the ones it records, else
 // guessed from the jobs' words), their pull requests with failing checks,
 // what they delivered, the other work linked to it, its architecture, and —
-// on a feature with an architecture — Implement, which starts a Code Change
-// job through the `implement` workflow.
+// on a feature with an architecture — Implement, which starts the job that
+// builds it through the `implement` workflow: a Code Change job when the
+// architecture says it is code in a repository, a builder job when it is
+// workflows or an app on this server. The person sees which, and may switch.
 import { useState } from "react";
 import { useHost, useStrutClient } from "@strut/kit";
 import { toast } from "sonner";
@@ -12,6 +14,14 @@ import type { Architecture } from "../lib/why";
 
 const STATE: Record<string, string> = { running: "working", done: "finished", failed: "failed" };
 
+type BuildsIn = "repo" | "strut";
+/** What Implement would start: the job's title, where it builds, and in which repositories. */
+interface Preview {
+  title: string;
+  builds_in: BuildsIn;
+  repos: string[];
+}
+
 export function BuildPanel({ card, work, jobs, links, architecture, loading }: { card: Card; work?: CardWork; jobs: CardJob[]; links: CardLink[]; architecture?: Architecture; loading?: boolean }) {
   const host = useHost();
   const client = useStrutClient();
@@ -19,26 +29,30 @@ export function BuildPanel({ card, work, jobs, links, architecture, loading }: {
   const [showArch, setShowArch] = useState(false);
   const open = (url?: string | null) => url && host.openLink(url);
   const other = links.filter((l) => l.kind !== "job");
-  const [preview, setPreview] = useState<string | null>(null);
+  const [preview, setPreview] = useState<Preview | null>(null);
   /** First what it would start (a dry run of `implement`), then — on the person's yes — the job itself. */
-  const look = async () => {
+  const look = async (builds_in?: BuildsIn) => {
     setStarting(true);
     try {
-      const out = await runToEnd(client, "stadeum/canvas/implement", { feature: card.id, dry_run: true });
-      setPreview(String(out["title"] ?? card.title));
+      const out = await runToEnd(client, "stadeum/canvas/implement", { feature: card.id, dry_run: true, ...(builds_in ? { builds_in } : {}) });
+      setPreview({
+        title: String(out["title"] ?? card.title),
+        builds_in: out["builds_in"] === "strut" ? "strut" : "repo",
+        repos: Array.isArray(out["repos"]) ? (out["repos"] as unknown[]).map(String) : [],
+      });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err), { duration: 10_000 });
     } finally {
       setStarting(false);
     }
   };
-  const implement = async () => {
+  const implement = async (p: Preview) => {
     setStarting(true);
     setPreview(null);
     const id = `impl:${card.id}`;
-    toast.loading("Starting a Code Change job", { id });
+    toast.loading(p.builds_in === "strut" ? "Starting a builder job" : "Starting a Code Change job", { id });
     try {
-      const out = await runToEnd(client, "stadeum/canvas/implement", { feature: card.id }, `impl:${card.id}`);
+      const out = await runToEnd(client, "stadeum/canvas/implement", { feature: card.id, builds_in: p.builds_in }, `impl:${card.id}`);
       toast.success(String(out["text"] ?? "Job started."), { id });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err), { id, duration: 10_000 });
@@ -77,7 +91,7 @@ export function BuildPanel({ card, work, jobs, links, architecture, loading }: {
                   <button type="button" className="sb-link" onClick={() => open(`/jobs/${j.job}`)}>
                     {j.title}
                   </button>
-                  <small className="sb-quiet"> · {STATE[j.state] ?? j.state}{j.via === "guess" ? " · guessed from its words" : " · linked"}</small>
+                  <small className="sb-quiet"> · {STATE[j.state] ?? j.state}{j.via === "title" ? " · named in its title" : ""}</small>
                 </span>
               </li>
             ))}
@@ -148,9 +162,16 @@ export function BuildPanel({ card, work, jobs, links, architecture, loading }: {
       )}
       {preview && (
         <div className="sb-pencil-box" data-testid="ic-implement-confirm">
-          <p>This starts a Code Change job, “{preview}”, on this feature.</p>
+          <p>
+            {preview.builds_in === "strut"
+              ? `This starts a builder job, “${preview.title}”, that builds it as workflows or an app on this server.`
+              : `This starts a Code Change job, “${preview.title}”, ${preview.repos.length ? `in ${preview.repos.join(", ")}` : "that finds the repositories to change"}.`}
+          </p>
+          <button type="button" className="sb-link sb-quiet" disabled={starting} onClick={() => void look(preview.builds_in === "strut" ? "repo" : "strut")}>
+            {preview.builds_in === "strut" ? "Change code in a repository instead" : "Build it on this server instead"}
+          </button>
           <span className="sb-row-btns">
-            <button type="button" className="sb-btn sb-small" disabled={starting} onClick={() => void implement()}>
+            <button type="button" className="sb-btn sb-small" disabled={starting} onClick={() => void implement(preview)}>
               Start the job
             </button>
             <button type="button" className="sb-btn sb-small" onClick={() => setPreview(null)}>

@@ -1,8 +1,10 @@
-type_description: "How a feature is built: a summary (description) and an optional mermaid diagram. Kept by the stadeum/canvas package."
+type_description: "How a feature is built: a summary (description) and an optional mermaid diagram. builds_in says where it is built: repo (code in a repository; repos is a JSON list of their https addresses, when known) or strut (workflows, steps or an app on this strut server). Kept by the stadeum/canvas package."
 attributes:
   name: string
   description: ?string
   diagram: ?string
+  builds_in: ?string
+  repos: ?string
   author: ?string
   created_by_kind: ?string
   removed_at: ?int

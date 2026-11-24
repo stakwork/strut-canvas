@@ -26,6 +26,8 @@ import {
   live,
   normStatus,
   initiativeNamed,
+  normBuildsIn,
+  reposOf,
 } from "./_canvas.js";
 import { addByPerson, choose, unchoose } from "./_brainstorm.js";
 import { removeCard, restoreCard } from "./_remove.js";
@@ -39,12 +41,12 @@ const EDITABLE: Record<string, string[]> = {
   [REQUIREMENT]: ["text", "name"],
   [MILESTONE]: ["name", "sequence", "status", "description", "due_date"],
   [FEATURE]: ["name", "status", "description"],
-  [ARCHITECTURE]: ["name", "description", "diagram"],
+  [ARCHITECTURE]: ["name", "description", "diagram", "builds_in", "repos"],
   [QUESTION]: ["text", "name"],
   [OPTION]: ["text", "name"],
 };
 /** Fields a person may empty; the rest need a value. */
-const CLEARABLE = new Set(["diagram", "description", "target_date", "due_date"]);
+const CLEARABLE = new Set(["diagram", "description", "target_date", "due_date", "repos"]);
 const TEXT_NAMED = new Set([STORY, REQUIREMENT, QUESTION, OPTION]);
 const ADD: Record<string, { edge: string; type: string; parent: string }> = {
   brief: { edge: HAS_BRIEF, type: BRIEF, parent: INITIATIVE },
@@ -165,7 +167,7 @@ export default defineStep({
           if (n.properties[field] !== undefined) await call(ctx, "graph/edit-node", { ref_id: n.ref_id, properties_to_be_deleted: [field] }, WHO);
           return { op: cfg.op, ref_id: n.ref_id, text: `Cleared ${field}.` };
         }
-        const data: Record<string, unknown> = { [field]: field === "sequence" ? Number(raw) : raw };
+        const data: Record<string, unknown> = { [field]: field === "sequence" ? Number(raw) : field === "builds_in" ? normBuildsIn(raw, WHO) : field === "repos" ? JSON.stringify(reposOf(raw, WHO)) : raw };
         if (field === "sequence" && !Number.isFinite(data["sequence"])) throw new Error(`${WHO}: sequence is a number`);
         if (TEXT_NAMED.has(n.node_type) && field === "text") data["name"] = clip(raw);
         await call(ctx, "graph/edit-node", { ref_id: n.ref_id, node_data: data }, WHO);

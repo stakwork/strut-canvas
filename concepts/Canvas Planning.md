@@ -49,7 +49,7 @@ When unsure which pace fits, take the slow one and ask. If the person's words as
 - `canvas` is code, not a planner: **you decide, it validates, stamps and writes.** No model runs inside it. Read first, then write.
   - **Read:** `{ mode: "read", about }` returns the node, its initiative subtree (brief, stories and requirements with ref_ids, milestones with sequence, features with SATISFIES, architecture, brainstorm roots) and, when `about` is a brainstorm card, the outline of that tree. Do not rely on chat history.
   - **Write:** `{ job, about?, plan }`. `plan` has only the parts you mean to write:
-    `new_initiative {name}` · `brief {title, text}` · `stories [{text, requirements[]}]` · `milestones [name]` · `features [{milestone, name, satisfies[]}]` · `architectures [{feature, name, summary, diagram}]` · `edits [{ref_id, field, value}]` (fields: name, text, title, summary, diagram, sequence; on an initiative, milestone or feature also status: planned, active, done or dropped, and blocked: true or false with blocked_reason) · `deletes [ref_id]`.
+    `new_initiative {name}` · `brief {title, text}` · `stories [{text, requirements[]}]` · `milestones [name]` · `features [{milestone, name, satisfies[]}]` · `architectures [{feature, name, summary, diagram, builds_in, repos}]` · `edits [{ref_id, field, value}]` (fields: name, text, title, summary, diagram, builds_in, repos, sequence; on an initiative, milestone or feature also status: planned, active, done or dropped, and blocked: true or false with blocked_reason) · `deletes [ref_id]`.
     `milestone` is a name or ref_id (also one created in the same plan). `satisfies` is a requirement's ref_id or its exact text. `feature` in an architecture is a name or ref_id. No `about` plus `new_initiative` creates an initiative.
   - **Brainstorm:** `{ job, about | root, prompt, brainstorm: { actions: [...] } }`. See **Brainstorm**.
   - Pass the person's words unchanged as `prompt` (brainstorm quotes are checked against it).
@@ -58,7 +58,7 @@ When unsure which pace fits, take the slow one and ask. If the person's words as
   - A call that only has words (no `plan`, no `brainstorm`) fails on purpose. To look, use `mode: "read"`.
 - **How much to write in one call:** a short request is one step. A long message that covers several levels is everything it says, in one `plan`, and nothing more. When the person gave no why, leave `brief` out and ask once. Never invent the why, a story, a requirement or a feature the person did not give.
 - **What code refuses, so you do not try it:** a story with no requirement; a feature that satisfies no known requirement, or a dropped one; a feature or architecture with no milestone or feature to go under; editing or deleting anything a person wrote (unless they asked, then `allow_human: true`); deleting anything work has started on; setting a requirement's status (a person's act); a duplicate initiative.
-- Implementation: once a feature has an architecture, run the `stadeum/canvas/implement` workflow `{ feature }`. It starts a Code Change job with the feature's requirements and architecture, and records the job on the feature, so its card shows the build. Do not write task nodes.
+- Implementation: once a feature has an architecture, run the `stadeum/canvas/implement` workflow `{ feature }`. It starts the job that builds it, with the feature's requirements and architecture, and records the job on the feature, so its card shows the build. Where the architecture says it is built picks the job: `builds_in: repo` (code in a repository, the default) is a Code Change job in its `repos`; `builds_in: strut` (workflows, steps or an app on this strut server) is a builder job. Do not write task nodes.
 
 ## The shape: problem first, then solution
 
@@ -90,7 +90,7 @@ Offer the earliest unfinished step for the level, and the next one at the end (o
 | top (no card) | Find or start initiatives. |
 | initiative | Brief (if the person has not said why, ask once), then confirm stories and requirements, then milestones. Often brainstorm how to stage it. |
 | milestone | Features, each satisfying the requirements it meets. Often brainstorm how to meet the requirements. |
-| feature | Architecture, then implement. A feature's architecture is a one-line summary in `name`, optional longer text in `description`, optional mermaid text in `diagram`. Follow a decided brainstorm. |
+| feature | Architecture, then implement. A feature's architecture is a one-line summary in `name`, optional longer text in `description`, optional mermaid text in `diagram`, and where it is built: `builds_in` `repo` with the `repos` (their https addresses) when you know them, or `strut` when the feature is workflows, steps or an app on this strut server. When it is not clear which, ask. Follow a decided brainstorm. |
 
 ## Opening things: "pull up", "load", "open"
 

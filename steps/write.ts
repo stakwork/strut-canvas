@@ -1,5 +1,5 @@
 import { z, defineStep } from "strut";
-import { initiativeNamed, live, normStatus as canvasStatus } from "./_canvas.js";
+import { initiativeNamed, live, normBuildsIn, normStatus as canvasStatus, reposOf } from "./_canvas.js";
 import { removeCard } from "./_remove.js";
 
 async function call(ctx: any, type: string, cfg: any) {
@@ -26,7 +26,7 @@ const FLAGS = ["status", "blocked", "blocked_reason"];
 const EDITABLE: Record<string, string[]> = {
   Initiative: ["name", "description", ...FLAGS],
   Brief: ["text", "name"], UserStory: ["text", "name"], Requirement: ["text", "name"],
-  Milestone: ["name", "description", "sequence", ...FLAGS], Feature: ["name", "description", ...FLAGS], Architecture: ["name", "description", "diagram"],
+  Milestone: ["name", "description", "sequence", ...FLAGS], Feature: ["name", "description", ...FLAGS], Architecture: ["name", "description", "diagram", "builds_in", "repos"],
 };
 /** A status as the canvas writes it (planned, active, done, dropped). BLOCKED is the `blocked` flag, never a status. */
 function normStatus(_type: string, raw: any): string {
@@ -352,12 +352,16 @@ export default defineStep({
         const longer = String(a.summary ?? "").trim();
         const description = longer && norm(longer) !== norm(name) ? longer : "";
         const diagram = String(a.diagram ?? "").trim();
+        const where: Record<string, unknown> = {};
+        if (a.builds_in !== undefined && a.builds_in !== null && a.builds_in !== "") where.builds_in = normBuildsIn(a.builds_in);
+        if (a.repos !== undefined && a.repos !== null) { const rs = reposOf(a.repos); if (rs.length) where.repos = JSON.stringify(rs); }
+        if (where.repos && where.builds_in === "strut") throw new Error(`canvas: architecture "${name}" is built in strut, so it has no repos. Nothing was written.`);
         const spec = String(a.feature ?? "").trim();
         const feats = allFeatures();
         const f = spec ? feats.find((x: any) => x.ref === spec || norm(x.name) === norm(spec)) : feats.find((x: any) => x.ref === c.feature_ref);
         if (!f) throw new Error(`canvas: architecture "${name}" has no feature: ${spec ? `"${spec}" is not one of` : "say which one of"} ${feats.map((x: any) => `"${x.name}"`).join(", ") || "(none yet)"}. Nothing was written.`);
-        if (f.architecture[0]) cmds.push({ k: "patch", ref: f.architecture[0].ref, type: "Architecture", data: { name, ...(description ? { description } : {}), ...(diagram ? { diagram } : {}) }, label: name });
-        else { const p = mk(f.ref, "HAS_ARCHITECTURE", "Architecture", { name, ...(description ? { description } : {}), ...(diagram ? { diagram } : {}) }); f.architecture.push({ ref: p, name }); }
+        if (f.architecture[0]) cmds.push({ k: "patch", ref: f.architecture[0].ref, type: "Architecture", data: { name, ...(description ? { description } : {}), ...(diagram ? { diagram } : {}), ...where }, label: name });
+        else { const p = mk(f.ref, "HAS_ARCHITECTURE", "Architecture", { name, ...(description ? { description } : {}), ...(diagram ? { diagram } : {}), ...where }); f.architecture.push({ ref: p, name }); }
       }
     }
 
@@ -385,7 +389,7 @@ export default defineStep({
         const k = n.type === "Architecture" ? (FIELD_ALIAS[k0] ?? k0) : n.type === "Brief" && k0 === "title" ? "name" : isFlag ? k0.toLowerCase() : k0;
         if (!allowed.includes(k)) throw new Error(`canvas: field "${k0}" cannot be edited on ${n.type} (allowed: ${allowed.join(", ")}). Requirement status is a person's act (accept/drop). Nothing was written.`);
         if (k === "sequence" && !Number.isFinite(Number(e.value))) throw new Error(`canvas: sequence must be a number, got "${e.value}". Nothing was written.`);
-        (byRef[ref] ??= {})[k] = k === "status" ? normStatus(n.type, e.value) : k === "blocked" ? normBool(e.value) : k === "blocked_reason" ? String(e.value ?? "").trim() : k === "sequence" ? Number(e.value) : (k === "diagram" || k === "description" ? String(e.value ?? "") : nonEmpty(e.value, `field ${k}`));
+        (byRef[ref] ??= {})[k] = k === "status" ? normStatus(n.type, e.value) : k === "blocked" ? normBool(e.value) : k === "blocked_reason" ? String(e.value ?? "").trim() : k === "sequence" ? Number(e.value) : k === "builds_in" ? normBuildsIn(e.value) : k === "repos" ? JSON.stringify(reposOf(e.value)) : (k === "diagram" || k === "description" ? String(e.value ?? "") : nonEmpty(e.value, `field ${k}`));
       }
       for (const [ref, fields] of Object.entries(byRef)) {
         const n = nodeOf(ref);

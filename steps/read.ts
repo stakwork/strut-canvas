@@ -6,7 +6,7 @@ async function call(ctx: any, type: string, cfg: any) {
   if (!def) throw new Error(`stadeum/canvas/read: step ${type} not in registry`);
   return def.run(def.input.parse(cfg), ctx);
 }
-const PROPS = ["text", "title", "status", "blocked", "blocked_reason", "description", "sequence", "created_by_kind", "author", "made_by", "state", "diagram", "target_date", "due_date"];
+const PROPS = ["text", "title", "status", "blocked", "blocked_reason", "description", "sequence", "created_by_kind", "author", "made_by", "state", "diagram", "builds_in", "repos", "target_date", "due_date"];
 
 export default defineStep({
   type: "stadeum/canvas/read",

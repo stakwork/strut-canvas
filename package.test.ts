@@ -272,6 +272,19 @@ describe("stadeum/canvas", () => {
     await canvas({ about: ids["feature"], plan: { architectures: [{ feature: ids["feature"], name: "A checklist page over the setup steps", summary: "One page, each step a row." }] } });
     const dry = await run(IMPLEMENT, { feature: ids["feature"], dry_run: true });
     assert.match(dry.title, /^Implement: Setup checklist \[/);
+    // Code in a repository unless the architecture says otherwise: a Code Change job.
+    assert.deepEqual([dry.builds_in, dry.workflow, dry.repos], ["repo", "job", []]);
+    // The planning job says where it is built; the person may switch at Implement.
+    await canvas({ about: ids["feature"], plan: { architectures: [{ feature: ids["feature"], name: "A checklist page over the setup steps", builds_in: "repo", repos: ["https://example.com/team/app"] }] } });
+    const inRepo = await run(IMPLEMENT, { feature: ids["feature"], dry_run: true });
+    assert.deepEqual([inRepo.workflow, inRepo.repos], ["job", ["https://example.com/team/app"]]);
+    const here = await run(IMPLEMENT, { feature: ids["feature"], dry_run: true, builds_in: "strut" });
+    assert.deepEqual([here.builds_in, here.workflow, here.repos], ["strut", "builder", []]);
+    const arch = (await canvas({ mode: "read", about: ids["feature"] })).initiative.milestones[0].features[0].architecture[0];
+    await ops({ op: "edit", ref_id: arch.ref_id, field: "builds_in", value: "workflow" });
+    assert.equal((await run(IMPLEMENT, { feature: ids["feature"], dry_run: true })).workflow, "builder");
+    await assert.rejects(ops({ op: "edit", ref_id: arch.ref_id, field: "builds_in", value: "somewhere" }), /builds_in is repo .* or strut/);
+    await assert.rejects(canvas({ about: ids["feature"], plan: { architectures: [{ feature: ids["feature"], name: "x", builds_in: "strut", repos: ["https://example.com/a/b"] }] } }), /has no repos/);
     // A job on the feature (as `implement` records it) is work: the feature, and what it is under, cannot be removed.
     await strut.workspace.publishWorkflowByContent("test/record", `steps:\n  - id: s\n    type: stadeum/canvas/job-started\n    config: ${JSON.stringify({ feature: ids["feature"], job: "job-build-1" })}\n`);
     const rec = await strut.run("test/record", {}, { actor: "ada", principal: "ada" });

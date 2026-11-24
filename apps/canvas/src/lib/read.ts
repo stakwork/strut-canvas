@@ -186,7 +186,7 @@ export interface CardJob {
   job: string;
   title: string;
   state: "running" | "done" | "failed";
-  via?: "link" | "guess";
+  via?: "card" | "title";
   error?: string;
   by?: string;
 }
