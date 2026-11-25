@@ -45,6 +45,8 @@ describe("stadeum/canvas", () => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let graph: any;
   let appVersion = "";
+  /** What GET /packages says a call on the box records onto. */
+  let calls: unknown;
 
   /** A run of one of the package's workflows, as a person. Its output, or it throws with the run's error. */
   const run = async (workflow: string, input: Record<string, unknown>, actor = "ada") => {
@@ -114,6 +116,8 @@ describe("stadeum/canvas", () => {
       const body = await res.json();
       assert.equal(res.status, 201, JSON.stringify(body));
       assert.deepEqual(body.warnings, []);
+      const listed = await strut.app.request("/packages", { headers: { authorization: `Bearer ${key}`, "x-strut-actor": "root" } });
+      calls = ((await listed.json()) as { packages: { package: string; calls?: unknown }[] }).packages.find((p) => p.package === "stadeum/canvas")?.calls;
     } finally {
       delete process.env["STRUT_API_KEY"];
     }
@@ -130,6 +134,8 @@ describe("stadeum/canvas", () => {
 
   it("installs its app, built against this strut's kit, and its pages under Job", async () => {
     assert.match(appVersion, /^v\d+$/);
+    // A recorded group call is a Call Canvas job, shown in the call as the canvas.
+    assert.deepEqual(calls, { kind: "Call Canvas", app: APP });
     const found = await run("stadeum/canvas/canvas", { mode: "read" });
     assert.equal(found.level, "top");
   });

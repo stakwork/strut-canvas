@@ -1,3 +1,7 @@
 package: stadeum/canvas
 version: 0.1.0
 description: The Infinite Canvas app where a team plans initiatives (milestones, features, why they exist) and brainstorms decisions as trees of questions and options, the canvas workflow a Canvas Planning job writes through, and the pages that job and Jamie follow.
+# What a group call on the box records onto: a Call Canvas job, shown in the call as this app.
+calls:
+  kind: Call Canvas
+  app: canvas
