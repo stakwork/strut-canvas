@@ -12,6 +12,7 @@ import { fontOf } from "../lib/font";
 import { Byline } from "./Byline";
 import { parseStory, workFor, type Why } from "../lib/why";
 import { Editable, type Act } from "./Details";
+import { FromCall } from "./Transcript";
 
 export interface Trace {
   story: string | null;
@@ -128,6 +129,7 @@ export function WhySheet({
                 <Byline author={s.author} />
               </span>
             </button>
+            <FromCall id={id} />
             {open && (
               <div className="sb-story-tools">
                 <Editable long className="sb-edit-text" label="Story" value={s.text} placeholder="As a …, I want …, so that …" onSave={(text) => text && void act({ op: "edit", ref_id: id, field: "text", value: text }, "Saving the story")} />
@@ -154,6 +156,7 @@ export function WhySheet({
                           <Byline author={q.author} />
                         </small>
                       </button>
+                      <FromCall id={r} />
                       {on && !serving && (
                         <div className="sb-req-tools">
                           <Editable long className="sb-edit-text" label="Requirement" value={q.text} placeholder="What must be true" onSave={(text) => text && void act({ op: "edit", ref_id: r, field: "text", value: text }, "Saving the requirement")} />

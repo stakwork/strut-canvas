@@ -1,6 +1,49 @@
 import { z, defineStep } from "strut";
 import { initiativeNamed, live, normBuildsIn, normStatus as canvasStatus, reposOf } from "./_canvas.js";
 import { removeCard } from "./_remove.js";
+import { norm as canvasNorm } from "./_canvas.js";
+
+// ── a call's chunk lines and a card's back-link (inlined from the package's steps/_transcript.ts: a helper module cannot be published here) ──
+const NUMBERED = /^\s*(\d+)\s+\[(\d{1,2}):(\d{2})\]\s+([^:\n]{1,80}?):\s?(.*)$/;
+interface ChunkLine { n: number; hh: number; mm: number; speaker: string; text: string }
+function chunkLines(prompt: string): ChunkLine[] {
+  const out: ChunkLine[] = [];
+  for (const l of String(prompt ?? "").split("\n")) {
+    const m = NUMBERED.exec(l);
+    if (m) out.push({ n: Number(m[1]), hh: Number(m[2]), mm: Number(m[3]), speaker: m[4]!.trim(), text: m[5]!.trim() });
+  }
+  return out;
+}
+function citedLines(raw: unknown, prompt: string): { lines: ChunkLine[]; problem?: string } {
+  if (raw === undefined || raw === null) return { lines: [] };
+  const list = Array.isArray(raw) ? raw : [raw];
+  if (!list.length) return { lines: [] };
+  const bad = list.filter((x) => !Number.isInteger(Number(x)) || Number(x) < 0 || x === "" || typeof x === "boolean");
+  if (bad.length) return { lines: [], problem: `lines must be line numbers from the chunk (got ${JSON.stringify(bad[0])})` };
+  const chunk = new Map(chunkLines(prompt).map((l) => [l.n, l]));
+  if (!chunk.size) return { lines: [], problem: "lines cite line numbers, but the prompt has no numbered lines (n [hh:mm] Name: text): pass the call's chunk unchanged as prompt" };
+  const ns = [...new Set(list.map(Number))].sort((a, b) => a - b);
+  const missing = ns.filter((n) => !chunk.has(n));
+  if (missing.length) return { lines: [], problem: `line${missing.length > 1 ? "s" : ""} ${missing.join(", ")} ${missing.length > 1 ? "are" : "is"} not in this turn's chunk (it has ${[...chunk.keys()][0]}–${[...chunk.keys()].pop()})` };
+  return { lines: ns.map((n) => chunk.get(n)!) };
+}
+function backLink(a: { lines?: unknown; speaker?: unknown; quote?: unknown }, prompt: string, job: string | undefined, where: string): Record<string, string> {
+  const { lines, problem } = citedLines(a.lines, prompt);
+  if (problem) throw new Error(`${where}: ${problem}`);
+  const speaker = String(a.speaker ?? "").trim();
+  const quote = String(a.quote ?? "").trim();
+  const out: Record<string, string> = {};
+  if (lines.length) {
+    if (!job) throw new Error(`${where}: lines cite the call, but the run names no job`);
+    out["call_job"] = job;
+    out["call_lines"] = JSON.stringify(lines.map((l) => l.n));
+    if (speaker && !lines.some((l) => canvasNorm(l.speaker) === canvasNorm(speaker))) throw new Error(`${where}: "${speaker}" said none of lines ${lines.map((l) => l.n).join(", ")}`);
+    if (quote && !canvasNorm(lines.map((l) => l.text).join(" ")).includes(canvasNorm(quote))) throw new Error(`${where}: "${quote.slice(0, 60)}" is not in lines ${lines.map((l) => l.n).join(", ")}`);
+  } else if (quote && prompt && !canvasNorm(prompt).includes(canvasNorm(quote))) throw new Error(`${where}: "${quote.slice(0, 60)}" is not in the prompt verbatim`);
+  if (speaker) out["speaker"] = speaker;
+  if (quote) out["quote"] = quote;
+  return out;
+}
 
 async function call(ctx: any, type: string, cfg: any) {
   const def = ctx.registry?.[type];
@@ -53,6 +96,7 @@ export default defineStep({
     plan: z.any(),
     context: z.any(),
     job: z.string().optional(),
+    prompt: z.string().default("").describe("The person's words, or the call's chunk: the line numbers a card cites (`lines`) are checked against it"),
     created_by_kind: z.enum(["strut", "jamie"]).default("jamie"),
     allow_human: z.boolean().default(false),
     expected_action: z.string().optional(),
@@ -144,22 +188,31 @@ export default defineStep({
 
     if (P.stories.length) {
       need.add("stories");
+      // A requirement is its text, or { text, lines?, speaker?, quote? } when it was said on a call.
+      const reqText = (r: any) => String((r && typeof r === "object" ? r.text : r) ?? "").trim();
+      // From a call: the chunk's line numbers it came from (`lines`), who said it, their words; checked against the chunk.
+      const linkOf = (x: any, what: string) => {
+        if (!x || typeof x !== "object") return {};
+        try { return backLink(x, cfg.prompt, cfg.job, `canvas: ${what}`); } catch (e: any) { throw new Error(`${e.message}. Nothing was written.`); }
+      };
       for (const s of P.stories) {
         nonEmpty(s.text, "a story's text");
-        const reqs = arr(s.requirements).map((r) => String(r ?? "").trim()).filter(Boolean);
+        const reqs = arr(s.requirements).map(reqText).filter(Boolean);
         if (!reqs.length) throw new Error(`canvas: the story "${clip(String(s.text), 60)}" has no requirements. Every story needs at least one requirement; nothing was written.`);
+        s._link = linkOf(s, `the story "${clip(String(s.text), 60)}"`);
+        s._reqs = arr(s.requirements).filter((r) => reqText(r)).map((r) => ({ text: reqText(r), link: linkOf(r, `the requirement "${clip(reqText(r), 60)}"`) }));
       }
       for (const s of P.stories) {
         const text = String(s.text).trim();
         let story = model.stories.find((x: any) => norm(x.text) === norm(text));
         if (story) skipped.push({ what: `story "${clip(text, 60)}"`, reason: "already exists (kept; missing requirements are added)" });
         else {
-          const p = mk(initRef, "HAS_STORY", "UserStory", { name: clip(text), text, status: "proposed", ...stamp() });
+          const p = mk(initRef, "HAS_STORY", "UserStory", { name: clip(text), text, status: "proposed", ...s._link, ...stamp() });
           story = { ref: p, text, requirements: [] }; model.stories.push(story);
         }
-        for (const rt of arr(s.requirements).map((r) => String(r).trim()).filter(Boolean)) {
+        for (const { text: rt, link } of s._reqs as Array<{ text: string; link: Record<string, string> }>) {
           if (story.requirements.some((r: any) => norm(r.text) === norm(rt))) { skipped.push({ what: `requirement "${clip(rt, 60)}"`, reason: "already exists" }); continue; }
-          const rp = mk(story.ref, "HAS_REQUIREMENT", "Requirement", { name: clip(rt), text: rt, status: "proposed", ...stamp() });
+          const rp = mk(story.ref, "HAS_REQUIREMENT", "Requirement", { name: clip(rt), text: rt, status: "proposed", ...link, ...stamp() });
           story.requirements.push({ ref: rp, text: rt, status: "proposed" });
         }
       }

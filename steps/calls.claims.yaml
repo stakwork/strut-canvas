@@ -1,0 +1,17 @@
+- text: Lists only recorded calls (call-… jobs), newest first.
+  checks:
+    - type: exec
+      config:
+        cmd: node
+        stdin: '{{ input }}'
+        args:
+          - '-e'
+          - >-
+            let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const i=JSON.parse(s);const
+            c=i.output?.calls||[];const bad=c.filter(x=>!/^call-/.test(x.job));const
+            t=c.map(x=>Date.parse(x.createdAt||x.usedAt||'')||0);const
+            sorted=t.every((v,k)=>k===0||t[k-1]>=v);console.log(JSON.stringify({supports:!bad.length&&sorted,content:`${c.length}
+            calls; not call-: ${bad.length}; newest first: ${sorted}`}))})
+      name: only call jobs, newest first
+      when: run
+      policy: always

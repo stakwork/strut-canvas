@@ -11,6 +11,7 @@ import type { ThinkLayout, TNode } from "../lib/thinktree";
 import { Editable, type Act } from "./Details";
 import { Byline } from "./Byline";
 import { Pips } from "./Brainstorm";
+import { FromCall } from "./Transcript";
 
 const STATE_WORD = { idle: "Not started", prog: "In progress", done: "Done", block: "Blocked" } as const;
 
@@ -168,6 +169,7 @@ function AskNode({ n, style, b, picked, expanded, act, onToggleAsk, onAsk }: Pro
           <span className="bt-fold">{q.options.length || q.subs.length ? (open ? `▾ hide ${q.options.length ? "options" : "questions"}` : `▸ ${under(q.options.length, q.subs.length)}`) : open ? "▾" : "▸ add options"}</span>
         </span>
       </button>
+      <FromCall id={n.id} />
       {editing && <Editable hand={q.hand} long className="sb-edit-title" label="Question" value={q.text} placeholder="Untitled question" onSave={(text) => (setEditing(false), text && text !== q.text && void act({ op: "edit", ref_id: q.id, field: "text", value: text }, "Saving the question"))} />}
       {open && (
         <div className="bt-tools">
@@ -223,6 +225,7 @@ function OptionNode({ n, style, b, act }: Props & Sty) {
         {o.label ? <b className="ic-letter">{o.label}</b> : null}
         {o.text}
       </strong>
+      <FromCall id={n.id} />
       {o.ratings && (
         <span className="ic-rate">
           <Pips label="Fast" score={o.ratings.fast} />

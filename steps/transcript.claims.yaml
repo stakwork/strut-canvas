@@ -1,0 +1,35 @@
+- text: >-
+    A call's transcript reads the same when the canvas page asks for it, whose job name strut scopes to the app
+    (app/<app>/call-…).
+  checks:
+    - type: exec
+      config:
+        cmd: node
+        stdin: '{{ input }}'
+        args:
+          - '-e'
+          - >-
+            let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const i=JSON.parse(s);const
+            j=String(i.input?.job||'');const
+            ok=!/^app\//.test(j)||(i.output&&Array.isArray(i.output.lines));console.log(JSON.stringify({supports:!!ok,content:ok?`job
+            ${j} read (${i.output?.lines?.length??0} lines, from ${i.output?.from})`:`job ${j} was refused:
+            ${i.error?.message??'no output'}`}))})
+      name: app-scoped job name reads
+      when: run
+      policy: always
+- text: A recorded call's transcript reads back its lines, from the stored file or rebuilt from the scribe's turns.
+  checks:
+    - type: exec
+      config:
+        cmd: sh
+        args:
+          - '-c'
+          - >-
+            case "$1" in stored|prompts) [ -n "$2" ] && [ "$2" != null ] && echo "from=$1 last=$2" && exit 0;; esac;
+            echo "no lines: from=$1 last=$2"; exit 1
+          - sh
+          - '{{ input.output.from }}'
+          - '{{ input.output.last }}'
+      name: lines came back
+      when: run
+      policy: always

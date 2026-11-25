@@ -61,6 +61,8 @@ export interface Why {
   serves: Record<string, string[]>;
   /** A piece of work's architecture. */
   architecture: Record<string, Architecture>;
+  /** The stories and requirements written from a call (./transcript.ts), when the read collected them. */
+  calls?: import("./transcript").CallRef[];
 }
 
 const str = (v: unknown) => (typeof v === "string" ? v.trim() : "");

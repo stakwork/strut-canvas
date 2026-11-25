@@ -15,6 +15,7 @@ import { buildWhy, WHY, type Why, type WhyRoles } from "./why";
 import { PLAN_STEPS, planProposals, type ProposalRecord } from "./proposals";
 import { bump, FEED_TYPES, readsTouched, type Revs } from "./feed";
 import { patchBrainstorms, patchPlan, patchWhy } from "./optimistic";
+import { callRefsOf } from "./transcript";
 
 const FIND = "graph/find";
 /** graph/find's largest page. */
@@ -132,7 +133,10 @@ export async function readBrainstorms(client: StrutClient, plan: Plan, roles: Br
   const own = [...questions.nodes, ...options.nodes, ...effects.nodes].map((n) => n.ref_id);
   // A question's edge to the card it is about leads out of the brainstorm, into the plan.
   const { edges } = await edgesOf(client, own, liveIds(plan));
-  return buildBrainstorms(questions.nodes, options.nodes, edges, plan, roles, effects.nodes);
+  const out = buildBrainstorms(questions.nodes, options.nodes, edges, plan, roles, effects.nodes);
+  // The questions and options the scribe wrote from a call, with the lines they came from (the transcript's tags).
+  out.calls = [...callRefsOf(questions.nodes, "question"), ...callRefsOf(options.nodes, "option")];
+  return out;
 }
 
 /** The brainstorms about the plan's cards, read once the plan is, and again when one is written. */
@@ -153,7 +157,9 @@ export async function readWhy(client: StrutClient, plan: Plan, roles: WhyRoles =
   const own = [...briefs.nodes, ...stories.nodes, ...requirements.nodes, ...architectures.nodes].map((n) => n.ref_id);
   // A goal's edge to its brief and stories, work's to a requirement or its architecture, come in from the plan.
   const { edges } = await edgesOf(client, own, liveIds(plan));
-  return buildWhy({ briefs: briefs.nodes, stories: stories.nodes, requirements: requirements.nodes, architectures: architectures.nodes }, edges, plan, roles);
+  const out = buildWhy({ briefs: briefs.nodes, stories: stories.nodes, requirements: requirements.nodes, architectures: architectures.nodes }, edges, plan, roles);
+  out.calls = [...callRefsOf(stories.nodes, "story"), ...callRefsOf(requirements.nodes, "requirement")];
+  return out;
 }
 
 /** Each goal's brief, stories and requirements, the work that answers them, and each feature's architecture. */

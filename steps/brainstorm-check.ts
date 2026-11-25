@@ -1,6 +1,49 @@
 import { z, defineStep } from "strut";
 import { norm } from "./_canvas.js";
 
+// ── a call's chunk lines and a card's back-link (inlined from the package's steps/_transcript.ts: a helper module cannot be published here) ──
+/** A numbered chunk line: `n [hh:mm] Name: text`. */
+const NUMBERED = /^\s*(\d+)\s+\[(\d{1,2}):(\d{2})\]\s+([^:\n]{1,80}?):\s?(.*)$/;
+interface ChunkLine { n: number; hh: number; mm: number; speaker: string; text: string }
+function chunkLines(prompt: string): ChunkLine[] {
+  const out: ChunkLine[] = [];
+  for (const l of String(prompt ?? "").split("\n")) {
+    const m = NUMBERED.exec(l);
+    if (m) out.push({ n: Number(m[1]), hh: Number(m[2]), mm: Number(m[3]), speaker: m[4]!.trim(), text: m[5]!.trim() });
+  }
+  return out;
+}
+function citedLines(raw: unknown, prompt: string): { lines: ChunkLine[]; problem?: string } {
+  if (raw === undefined || raw === null) return { lines: [] };
+  const list = Array.isArray(raw) ? raw : [raw];
+  if (!list.length) return { lines: [] };
+  const bad = list.filter((x) => !Number.isInteger(Number(x)) || Number(x) < 0 || x === "" || typeof x === "boolean");
+  if (bad.length) return { lines: [], problem: `lines must be line numbers from the chunk (got ${JSON.stringify(bad[0])})` };
+  const chunk = new Map(chunkLines(prompt).map((l) => [l.n, l]));
+  if (!chunk.size) return { lines: [], problem: "lines cite line numbers, but the prompt has no numbered lines (n [hh:mm] Name: text): pass the call's chunk unchanged as prompt" };
+  const ns = [...new Set(list.map(Number))].sort((a, b) => a - b);
+  const missing = ns.filter((n) => !chunk.has(n));
+  if (missing.length) return { lines: [], problem: `line${missing.length > 1 ? "s" : ""} ${missing.join(", ")} ${missing.length > 1 ? "are" : "is"} not in this turn's chunk (it has ${[...chunk.keys()][0]}–${[...chunk.keys()].pop()})` };
+  return { lines: ns.map((n) => chunk.get(n)!) };
+}
+function backLink(a: { lines?: unknown; speaker?: unknown; quote?: unknown }, prompt: string, job: string | undefined, where: string): Record<string, string> {
+  const { lines, problem } = citedLines(a.lines, prompt);
+  if (problem) throw new Error(`${where}: ${problem}`);
+  const speaker = String(a.speaker ?? "").trim();
+  const quote = String(a.quote ?? "").trim();
+  const out: Record<string, string> = {};
+  if (lines.length) {
+    if (!job) throw new Error(`${where}: lines cite the call, but the run names no job`);
+    out["call_job"] = job;
+    out["call_lines"] = JSON.stringify(lines.map((l) => l.n));
+    if (speaker && !lines.some((l) => norm(l.speaker) === norm(speaker))) throw new Error(`${where}: "${speaker}" said none of lines ${lines.map((l) => l.n).join(", ")}`);
+    if (quote && !norm(lines.map((l) => l.text).join(" ")).includes(norm(quote))) throw new Error(`${where}: "${quote.slice(0, 60)}" is not in lines ${lines.map((l) => l.n).join(", ")}`);
+  } else if (quote && prompt && !norm(prompt).includes(norm(quote))) throw new Error(`${where}: "${quote.slice(0, 60)}" is not in the prompt verbatim`);
+  if (speaker) out["speaker"] = speaker;
+  if (quote) out["quote"] = quote;
+  return out;
+}
+
 // stamps are code's: created_at / updated_at / created_by / created_by_kind (and variants) must never come from the model
 const STAMP_KEY = /^(created|updated)_?(at|by)$|^created_?by_?kind$|^(created|updated)at$/i;
 const scan = (x: any, path: string, out: string[]) => {
@@ -8,26 +51,29 @@ const scan = (x: any, path: string, out: string[]) => {
   else if (x && typeof x === "object") for (const [k, v] of Object.entries(x)) { if (STAMP_KEY.test(k)) out.push(`${path}.${k}`); scan(v, `${path}.${k}`, out); }
 };
 
-/** A transcript line: `[hh:mm] Name: text` or `Name: text`. */
-const LINE = /^\s*(?:\[[^\]]*\]\s*)?([^:\[\]\n]{1,60}):\s*(.*)$/;
+/** A transcript line: `n [hh:mm] Name: text` (a call's chunk), `[hh:mm] Name: text` or `Name: text`. */
+const LINE = /^\s*(\d+\s+(?=\[))?(?:\[[^\]]*\]\s*)?([^:\[\]\n]{1,60}):\s*(.*)$/;
 
 /**
  * Did `speaker` say `quote`, on a line of their own in the transcript? A choice is recorded only from a person's own
  * words: in a chat, where there are no speakers' lines, the person chooses on the card.
  */
-export function saidOnLine(transcript: string, speaker: string, quote: string): boolean {
+export function saidOnLine(transcript: string, speaker: string, quote: string, lines?: number[]): boolean {
   const who = norm(speaker), words = norm(quote);
   if (!who || !words) return false;
+  const only = lines?.length ? new Set(lines) : null;
   return transcript.split("\n").some((l) => {
     const m = LINE.exec(l);
-    return !!m && norm(m[1]) === who && norm(m[2]).includes(words);
+    if (!m) return false;
+    if (only && !(m[1] && only.has(Number(m[1])))) return false;
+    return norm(m[2]) === who && norm(m[3]).includes(words);
   });
 }
 
 export default defineStep({
   type: "stadeum/canvas/brainstorm-check",
   effect: "read",
-  description: "Structural + brainstorm-rule check of a DRAFT (nothing written), in code. The initiative must have requirements that are not dropped: effects are weighed against them. Draft actions are adds: { op: add, tmp, parent (ref | tmp | null), kind question|option, text, made_by, quote?, speaker?, criteria?, reversibility?, state?, makes?: string[], effects?: [{ name, description, score -1..1, requirement (ref_id) }], ratings?: { fast, good, cheap }, recommended? }, and chooses: { op: choose, option (ref | tmp), speaker, quote } — a choice a person said aloud, recorded only when `quote` is in a transcript line of `speaker`'s own ([hh:mm] Name: text) and the question has no chosen option yet. Checks parents, IBIS shape, verbatim quotes, criteria+reversibility on questions, every option has effects (score in [-1,1], non-zero, against a live requirement), three ratings in [-1,1], makes ([] at a feature, <=12 unique names), at most one recommended model option per question (open, not the person's), and that the model output carries NO stamp fields (created_at, updated_at, created_by, created_by_kind: code sets them). The '(recommended)' suffix is added by the writer step from the flag; it is shown once in the outline. Output { ok, problems, outline }.",
+  description: "Structural + brainstorm-rule check of a DRAFT (nothing written), in code. The initiative must have requirements that are not dropped: effects are weighed against them. Draft actions are adds: { op: add, tmp, parent (ref | tmp | null), kind question|option, text, made_by, quote?, speaker?, lines?: [n], criteria?, reversibility?, state?, makes?: string[], effects?: [{ name, description, score -1..1, requirement (ref_id) }], ratings?: { fast, good, cheap }, recommended? }, and chooses: { op: choose, option (ref | tmp), speaker, quote, lines?: [n] } — a choice a person said aloud, recorded only when `quote` is in a transcript line of `speaker`'s own ([hh:mm] Name: text) and the question has no chosen option yet. From a call, `lines` are the chunk's line numbers it came from: each must be a numbered line of the prompt (n [hh:mm] Name: text), the speaker one who said them and the quote their words. Checks parents, IBIS shape, verbatim quotes, criteria+reversibility on questions, every option has effects (score in [-1,1], non-zero, against a live requirement), three ratings in [-1,1], makes ([] at a feature, <=12 unique names), at most one recommended model option per question (open, not the person's), and that the model output carries NO stamp fields (created_at, updated_at, created_by, created_by_kind: code sets them). The '(recommended)' suffix is added by the writer step from the flag; it is shown once in the outline. Output { ok, problems, outline }.",
   input: z.object({
     draft: z.any(),
     tree: z.any().optional(),
@@ -67,7 +113,10 @@ export default defineStep({
         if (!o) { P(`${w}: option ${a.option} is neither in the tree nor added earlier in this draft`); return; }
         if (kind !== "option") { P(`${w}: only an option is chosen`); return; }
         if (o.state === "rejected") P(`${w}: "${String(o.text ?? "").slice(0, 50)}" was rejected`);
+        const cited = citedLines(a.lines, String(cfg.prompt ?? ""));
+        if (cited.problem) P(`${w}: ${cited.problem}`);
         if (!String(a.speaker ?? "").trim() || !String(a.quote ?? "").trim()) P(`${w}: a choice needs the speaker who made it and their words as quote`);
+        else if (cited.lines.length && !saidOnLine(String(cfg.prompt ?? ""), a.speaker, a.quote, cited.lines.map((l) => l.n))) P(`${w}: "${String(a.quote).slice(0, 60)}" is not on a line of ${a.speaker}'s among lines ${cited.lines.map((l) => l.n).join(", ")}`);
         else if (!saidOnLine(String(cfg.prompt ?? ""), a.speaker, a.quote)) P(`${w}: "${String(a.quote).slice(0, 60)}" is not on a line of ${a.speaker}'s in the transcript; a choice is recorded only from a person's own words (in a chat, the person chooses on the card)`);
         const q = o.parent;
         const taken = q ? [...(tree.nodes ?? []), ...byTmp.values()].some((n: any) => n.parent === q && n.kind === "option" && n.state === "chosen" && n.ref_id !== a.option)
@@ -101,6 +150,10 @@ export default defineStep({
         else if (prompt && !prompt.includes(norm(a.quote))) P(`${where}: quote is not in the person's message verbatim`);
       }
       if (a.speaker && prompt && !prompt.includes(norm(a.speaker))) P(`${where}: speaker "${a.speaker}" does not appear in the message`);
+      // From a call: the chunk's lines it came from; the speaker said one of them, the quote is their words.
+      if (a.lines !== undefined && a.lines !== null) {
+        try { backLink(a, String(cfg.prompt ?? ""), "check", where); } catch (e) { P(e instanceof Error ? e.message : String(e)); }
+      }
       if (a.state && !["open", "simulated"].includes(a.state)) P(`${where}: state must be open or simulated`);
       if (a.kind === "question") {
         if (!String(a.criteria ?? "").trim()) P(`${where}: a question needs criteria (2-4 things that decide it)`);

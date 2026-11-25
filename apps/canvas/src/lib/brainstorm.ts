@@ -81,6 +81,8 @@ export interface Brainstorms {
   choices: Record<string, Choice>;
   /** A plan card's root questions, the open ones first, then the newest. */
   byCard: Record<string, string[]>;
+  /** The questions and options written from a call (./transcript.ts), when the read collected them. */
+  calls?: import("./transcript").CallRef[];
 }
 
 const textOf = (n: RawNode): string => {

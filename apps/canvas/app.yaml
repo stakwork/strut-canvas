@@ -18,6 +18,10 @@ grants:
     - stadeum/canvas/brainstorm-tree
     - stadeum/canvas/work
     - stadeum/canvas/threads
+    # A recorded call's transcript: the lines voice stored, or an older call's rebuilt from the scribe's turns.
+    - stadeum/canvas/transcript
+    # The Calls list: every recorded call (call-… job), for replay.
+    - stadeum/canvas/calls
     # Needs you and Working now; pending plan changes drawn in pencil, decided here.
     - job/list
     - proposal/list

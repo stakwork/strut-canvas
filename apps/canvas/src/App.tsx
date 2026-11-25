@@ -36,8 +36,11 @@ import { BuildPanel } from "./components/Build";
 import { Palette } from "./components/Palette";
 import { workFor } from "./lib/why";
 import { usePresenter } from "./lib/present";
-import { watchLooking, whyPlace } from "./lib/follow";
+import { shownAs, whyPlace } from "./lib/follow";
 import type { Hit } from "./lib/search";
+import { useCall, useCalls } from "./lib/call";
+import { citedBy, type CallRef } from "./lib/transcript";
+import { CallLinksContext, CallsMenu, ChannelTap, TranscriptView, type CallLinks, type Focus } from "./components/Transcript";
 
 const STATE_WORD: Record<State, string> = { idle: "Not started", prog: "In progress", done: "Done", block: "Blocked" };
 const ROLE_WORD: Record<Role, string> = { goal: "Initiative", group: "Milestone", work: "Feature" };
@@ -49,6 +52,10 @@ interface Camera {
   y: number;
   z: number;
 }
+
+/** The desk's size in its own pixels. Not getBoundingClientRect: shown in the small window the desk is scaled down,
+ *  and the camera frames what it shows at full size. */
+const sizeOf = (d: HTMLElement) => ({ width: d.clientWidth, height: d.clientHeight });
 
 /** A card's small line: what it is, its state, how much under it is done. */
 function metaOf(plan: Plan, c: Card): string {
@@ -86,14 +93,213 @@ export default function App() {
   return (
     <Fence>
       <AuthorDirectory.Provider value={authors}>
-        <Board onAuthors={setAuthors} />
+        <Shell onAuthors={setAuthors} />
       </AuthorDirectory.Provider>
       <Toaster position="bottom-right" />
     </Fence>
   );
 }
 
-function Board({ onAuthors }: { onAuthors: (dir: Record<string, string>) => void }) {
+type View = "plan" | "transcript";
+/** How long the small window pulses after the view it shows changed. */
+const PULSE_MS = 4_000;
+
+/** The two views of the canvas — the planning map and a call's transcript — one in front, the other live in a small
+ *  window in the bottom left that swaps them on a click and pulses when what it shows changes. A recorded call
+ *  (`present=<job>`) opens on its transcript, following it; the call's first initiative written by the scribe
+ *  switches to the planning view on it, unless the person has used the toggle. Deep links: `present=<job>` (or
+ *  `call=<job>`, a call opened without presenting), `view=plan|transcript`, `line=<n>`; `sim=1` plays fixture
+ *  channel frames (a look's check of the merge). */
+function Shell({ onAuthors }: { onAuthors: (dir: Record<string, string>) => void }) {
+  const input = useToolInput<Record<string, string>>();
+  const str = (k: string) => (typeof input?.[k] === "string" && input[k] ? String(input[k]) : null);
+  const present = str("present");
+  const linkLine = str("line") !== null && Number.isInteger(Number(str("line"))) ? Number(str("line")) : null;
+  const [call, setCall] = useState<string | null>(() => present ?? str("call"));
+  const [view, setViewRaw] = useState<View>(() => (str("view") === "plan" ? "plan" : str("view") === "transcript" || linkLine !== null || (present ?? str("call")) ? "transcript" : "plan"));
+  // A link may arrive after the first render (the host hands the input over): take it once.
+  const tookLink = useRef(false);
+  useEffect(() => {
+    if (tookLink.current || !input) return;
+    const c = str("present") ?? str("call");
+    if (!c && !str("view") && linkLine === null) return;
+    tookLink.current = true;
+    if (c) setCall(c);
+    setViewRaw(str("view") === "plan" ? "plan" : c || str("view") === "transcript" || linkLine !== null ? "transcript" : "plan");
+    if (linkLine !== null) setFocus({ n: linkLine, k: 1 });
+  }, [input]);
+  /** The person used the toggle (or the small window): the first initiative no longer switches the view. */
+  const [toggled, setToggled] = useState(false);
+  const switched = useRef(false);
+  const [following, setFollowing] = useState(linkLine === null);
+  const [focus, setFocus] = useState<Focus | null>(linkLine !== null ? { n: linkLine, k: 1 } : null);
+  const [jump, setJump] = useState<{ id: string; n: number } | null>(null);
+  const [refs, setRefs] = useState<CallRef[]>([]);
+  const [callsOpen, setCallsOpen] = useState(false);
+  const [pulse, setPulse] = useState<{ n: number; why: string } | null>(null);
+  const [channel, setChannel] = useState<boolean | null>(null);
+  const [replay, setReplay] = useState<{ playing: boolean; shown: number; speed: number; marked: number | null }>({ playing: false, shown: 0, speed: 1, marked: null });
+  const sim = str("sim") === "1";
+  // `simcard=<ref_id>` makes that card cite line `simline` of the call (a look's check of the tags and
+  // "from the call" while no live card carries a back-link).
+  const simCard = str("simcard");
+  const simLine = Number(str("simline") ?? "1");
+  const allRefs = useMemo<CallRef[]>(() => (simCard && call ? [...refs, { id: simCard, kind: "question", job: call, lines: [simLine], title: "a fixture card (sim)" }] : refs), [refs, simCard, call, simLine]);
+  const feed = useCall(call);
+  const calls = useCalls(callsOpen || !!call);
+  const shownView: View = call ? view : "plan";
+  const hidden: View = shownView === "plan" ? "transcript" : "plan";
+
+  const setView = (v: View, byPerson: boolean) => {
+    if (byPerson) setToggled(true);
+    setViewRaw(v);
+    setPulse(null);
+  };
+  const bump = (why: string) => setPulse((p) => ({ n: (p?.n ?? 0) + 1, why }));
+  useEffect(() => {
+    if (!pulse) return;
+    const t = setTimeout(() => setPulse(null), PULSE_MS);
+    return () => clearTimeout(t);
+  }, [pulse?.n]);
+
+  // A new line while the transcript is in the small window: it pulses.
+  const lineCount = feed.lines.length;
+  const lastCount = useRef(0);
+  useEffect(() => {
+    const was = lastCount.current;
+    lastCount.current = lineCount;
+    if (was && lineCount > was && call && hidden === "transcript") bump("line");
+  }, [lineCount]);
+
+  const openLine = (job: string, n: number) => {
+    setCall(job);
+    setView("transcript", true);
+    setCallsOpen(false);
+    setFocus((f) => ({ n, k: (f?.k ?? 0) + 1 }));
+  };
+  const openCard = (r: CallRef) => {
+    setView("plan", true);
+    setJump((j) => ({ id: r.id, n: (j?.n ?? 0) + 1 }));
+  };
+  const onFresh = (ids: string[], goals: string[]) => {
+    // The call's first initiative: the planning view, zoomed to it — unless the person chose a view themselves.
+    const recording = !!call && !feed.done && (!!present || feed.live || feed.from === "stored");
+    if (goals.length && recording && !switched.current) {
+      switched.current = true;
+      if (!toggled && shownView === "transcript") {
+        setViewRaw("plan");
+        setJump((j) => ({ id: goals[0]!, n: (j?.n ?? 0) + 1 }));
+        return;
+      }
+    }
+    if (ids.length && call && hidden === "plan") bump(goals.length ? "initiative" : "card");
+  };
+  const pickCall = (job: string) => {
+    setCall(job);
+    setCallsOpen(false);
+    setView("transcript", true);
+    // A call that is over opens at its start, for reading back; one recording now at its newest line.
+    setFollowing(false);
+    setFocus((f) => ({ n: 1, k: (f?.k ?? 0) + 1 }));
+  };
+  // Opening a call that is recording follows it instead.
+  useEffect(() => {
+    if (call && !feed.done && (feed.live || feed.from === "stored") && !focus) setFollowing(true);
+  }, [feed.from]);
+
+  const links: CallLinks = useMemo(() => {
+    const byCard = new Map<string, CallRef[]>();
+    for (const r of allRefs) byCard.set(r.id, [...(byCard.get(r.id) ?? []), r]);
+    return { byCard, open: openLine };
+  }, [allRefs]);
+  const cited = useMemo(() => (call ? citedBy(allRefs, call) : new Map<number, CallRef[]>()), [allRefs, call]);
+  const callTitle = (calls.data?.find((c) => c.job === call)?.title ?? (call ? `Call ${call.replace(/^call-/, "").slice(0, 8)}` : "")) || "A call";
+
+  // What a look checks that the page's text cannot say.
+  useEffect(() => {
+    (window as unknown as { __debug?: unknown }).__debug = () => {
+      const board = (window as unknown as { __boardDebug?: () => unknown }).__boardDebug?.();
+      return {
+        view: shownView,
+        call,
+        present,
+        toggled,
+        autoSwitched: switched.current,
+        following,
+        lines: feed.lines.length,
+        lineNs: feed.lines.length <= 60 ? feed.lines.map((l) => l.n) : `${feed.lines[0]?.n}…${feed.lines[feed.lines.length - 1]?.n}`,
+        from: feed.from,
+        done: feed.done,
+        live: feed.live,
+        channel: channel === null ? "none" : channel ? "joined" : "unavailable",
+        frames: feed.frames,
+        dropped: feed.dropped,
+        speaking: feed.speaking.map((s) => s.speaker),
+        pip: call ? { shows: hidden, pulsing: !!pulse, why: pulse?.why ?? null } : null,
+        replay,
+        cited: [...cited.keys()],
+        focus: focus?.n ?? null,
+        board,
+      };
+    };
+  });
+
+  const toggle = (v: View) => {
+    if (v === "transcript" && !call) return setCallsOpen((o) => !o);
+    setView(v, true);
+  };
+
+  return (
+    <CallLinksContext.Provider value={links}>
+      <div className={`cv cv-${shownView}${call ? " cv-has-call" : ""}`}>
+        <div className={`cv-layer ${shownView === "plan" ? "cv-main" : "cv-pip"}`} aria-hidden={shownView !== "plan"}>
+          <Board onAuthors={onAuthors} active={shownView === "plan"} jump={jump} onFresh={onFresh} onCallRefs={setRefs} />
+        </div>
+        {call && (
+          <div className={`cv-layer ${shownView === "transcript" ? "cv-main" : "cv-pip"}`} aria-hidden={shownView !== "transcript"}>
+            <TranscriptView job={call} title={callTitle} call={feed} cited={cited} following={following} setFollowing={setFollowing} focus={focus} onOpenCard={openCard} active={shownView === "transcript"} onReplay={setReplay} />
+          </div>
+        )}
+        {call && (
+          <button type="button" className={`cv-pip-hit${pulse ? " cv-pulse" : ""}`} key={pulse?.n ?? 0} title={`Show the ${hidden === "plan" ? "planning view" : "transcript"}`} onClick={() => setView(hidden, true)}>
+            <span className="cv-pip-label">
+              {hidden === "plan" ? "Planning" : "Transcript"}
+              {pulse && <b>{pulse.why === "line" ? "new line" : pulse.why === "initiative" ? "new initiative" : "new card"}</b>}
+            </span>
+          </button>
+        )}
+        <div className="cv-switch" role="group" aria-label="Which view">
+          <button type="button" className="sb-btn" aria-pressed={shownView === "plan"} onClick={() => toggle("plan")}>
+            Planning
+          </button>
+          <button type="button" className="sb-btn" aria-pressed={shownView === "transcript"} onClick={() => toggle("transcript")}>
+            Transcript{call && !feed.done && (feed.live || feed.from === "stored") && <i className="tv-live-dot" />}
+          </button>
+          <i className="sb-sep" />
+          <button type="button" className="sb-btn sb-quietbtn" aria-expanded={callsOpen} onClick={() => setCallsOpen((o) => !o)}>
+            Calls
+          </button>
+        </div>
+        {callsOpen && <CallsMenu calls={calls.data} loading={calls.isLoading} current={call} onPick={pickCall} />}
+        {call && <ChannelTap key={call} job={call} sim={sim} startN={feed.lines.length ? feed.lines[feed.lines.length - 1]!.n : feed.from === "none" ? 0 : null} ingest={feed.ingest} ingestStates={feed.ingestStates} onAvailable={setChannel} />}
+      </div>
+    </CallLinksContext.Provider>
+  );
+}
+
+export interface BoardProps {
+  onAuthors: (dir: Record<string, string>) => void;
+  /** The planning view is the one in front (not the small window): only then does it take keys. */
+  active: boolean;
+  /** A card to go to, from the transcript (a line's tag, or the call's first initiative); `n` moves on each time. */
+  jump: { id: string; n: number } | null;
+  /** Cards that were not there at the last read (after the first), and which of them are initiatives an agent wrote. */
+  onFresh: (ids: string[], goals: string[]) => void;
+  /** Every card written from a call, with its lines (lib/transcript.ts). */
+  onCallRefs: (refs: CallRef[]) => void;
+}
+
+function Board({ onAuthors, active, jump, onFresh, onCallRefs }: BoardProps) {
   // One graph change feed for every read (lib/feed.ts): a page has only so many connections to the server.
   const revs = useCanvasFeed();
   const { data, error, isLoading } = usePlan(revs.plan);
@@ -121,9 +327,6 @@ function Board({ onAuthors }: { onAuthors: (dir: Record<string, string>) => void
   const toolInput = useToolInput<Record<string, string>>();
   // Presented (`present: <job>`): what Jamie shows a call. It follows that job's writes (lib/present.ts).
   const present = typeof toolInput?.["present"] === "string" && toolInput["present"] ? toolInput["present"] : null;
-  const presenter = usePresenter(present, base, b, why);
-  /** Presented, and a person is looking around it: nothing moves the camera but them. */
-  const looking = !!present && !presenter.following;
   const host = useHost();
   // The canvas always opens on the home map (the Board's rule): where the viewer was is not restored.
   // Earlier versions kept it in app state ("board", "camera"); an open clears those keys.
@@ -253,7 +456,7 @@ function Board({ onAuthors }: { onAuthors: (dir: Record<string, string>) => void
       const d = desk.current;
       const box = think ? tree?.box : layout && boundsOf(layout);
       if (!d || !box) return;
-      const r = d.getBoundingClientRect();
+      const r = sizeOf(d);
       if (!r.width) return;
       const w = box.x1 - box.x0 + 80;
       const h = box.y1 - box.y0 + 190;
@@ -265,23 +468,19 @@ function Board({ onAuthors }: { onAuthors: (dir: Record<string, string>) => void
     },
     [layout, goal, apply, inset, right, think, tree],
   );
-  // A new board, or more of it shown: frame it. Brainstorms arriving on the shelf do not move the camera, nor do new
-  // cards while a person looks around a presented canvas.
-  const framed = useRef({ board: "", more: "" });
+  // A new board, or more of it shown: frame it. Brainstorms arriving on the shelf do not move the camera.
+  const framed = useRef("");
   useLayoutEffect(() => {
-    const board = `${goal ?? HOME}/${inset}/${think}/${think && !!tree}`;
-    const more = `${shown.length}/${plan ? Object.keys(plan.cards).length : 0}`;
-    const was = framed.current;
-    if (was.board === board && was.more === more) return;
-    framed.current = { board, more };
-    if (was.board === board && looking) return;
+    const key = `${goal ?? HOME}/${shown.length}/${plan ? Object.keys(plan.cards).length : 0}/${inset}/${think}/${think && !!tree}`;
+    if (framed.current === key) return;
+    framed.current = key;
     fit();
-  }, [fit, goal, shown.length, plan, think, tree, looking]);
+  }, [fit, goal, shown.length, plan, think, tree]);
 
   /** Bring a box of the world into view, moving the camera as little as it can; it never zooms out below 0.5. */
   const reveal = useCallback(
     (box: { x0: number; y0: number; x1: number; y1: number }, fly = true) => {
-      const r = desk.current?.getBoundingClientRect();
+      const r = desk.current ? sizeOf(desk.current) : null;
       if (!r) return;
       const c = cam.current;
       // Zoom out only as far as the box's width needs (never below 0.5), about the window's middle.
@@ -351,7 +550,7 @@ function Board({ onAuthors }: { onAuthors: (dir: Record<string, string>) => void
   const flyTo = useCallback(
     (id: string) => {
       const s = layout?.spots[id];
-      const r = desk.current?.getBoundingClientRect();
+      const r = desk.current ? sizeOf(desk.current) : null;
       if (!s || !r) return;
       const z = Math.max(cam.current.z, 0.75);
       const clear = present ? 0 : 344;
@@ -372,7 +571,7 @@ function Board({ onAuthors }: { onAuthors: (dir: Record<string, string>) => void
   useLayoutEffect(() => {
     if (!picked || !right || think) return;
     const box = spotBox(picked);
-    const r = desk.current?.getBoundingClientRect();
+    const r = desk.current ? sizeOf(desk.current) : null;
     if (!box || !r) return;
     const c = cam.current;
     if (box.x1 * c.z + c.x <= r.width - right - 12 && box.x0 * c.z + c.x >= inset + 12) return;
@@ -565,12 +764,7 @@ function Board({ onAuthors }: { onAuthors: (dir: Record<string, string>) => void
     }
     goTo(h.id);
   };
-  // A person looking around the page (in a call tile; nobody touches the video): it stops following until Follow.
-  useEffect(() => {
-    const d = desk.current;
-    if (!present || !d) return;
-    return watchLooking(d, presenter.look);
-  }, [present, presenter.look]);
+  const presenter = usePresenter(present, base, b, why);
   useEffect(() => {
     const t = presenter.target;
     if (!t) return;
@@ -589,6 +783,45 @@ function Board({ onAuthors }: { onAuthors: (dir: Record<string, string>) => void
     // Every question the job just wrote is shown open: the call sees the options people named.
     if (b?.asks[t.id]) setExpanded((e) => new Set([...e, ...[...presenter.fresh].filter((id) => b.asks[id])]));
   }, [presenter.target]);
+
+  /** Go to a card from the transcript: a story or requirement on its initiative's Why sheet, an option on its
+   *  question, anything else where goTo takes it. */
+  const jumpTo = (ref: string) => {
+    const w = why ? whyPlace(ref, why) : null;
+    if (w) {
+      if (w.goal !== goal) open(w.goal);
+      setMode("map");
+      setTimeout(() => {
+        setSheet(true);
+        setTrace({ story: w.story, requirement: w.requirement });
+      }, 60);
+      return;
+    }
+    const id = shownAs(ref, plan, b, why) ?? ref;
+    setSheet(false);
+    goTo(id);
+  };
+  useEffect(() => {
+    if (jump) jumpTo(jump.id);
+  }, [jump?.n]);
+
+  // What is new on the canvas since the last read: the transcript's small window pulses, and the call's first
+  // initiative may switch the view (the shell decides). The first read is what was already there.
+  const known = useRef<Set<string> | null>(null);
+  useEffect(() => {
+    if (!base || !b || !why) return;
+    const ids = [...Object.keys(base.cards), ...Object.keys(b.asks), ...Object.keys(b.choices), ...Object.keys(why.stories), ...Object.keys(why.requirements)];
+    const was = known.current;
+    known.current = new Set(ids);
+    if (!was) return;
+    const fresh = ids.filter((id) => !was.has(id));
+    if (!fresh.length) return;
+    onFresh(fresh, fresh.filter((id) => base.cards[id]?.role === "goal" && base.cards[id]!.by !== "person"));
+  }, [base, b, why]);
+
+  // The cards written from a call, for the transcript's tags and the cards' "from the call".
+  const refsKey = JSON.stringify([b?.calls ?? [], why?.calls ?? []]);
+  useEffect(() => onCallRefs([...(b?.calls ?? []), ...(why?.calls ?? [])]), [refsKey]);
 
   // A deep link opens where it points: `at` (or ref / node / canvas) is a card, `roadmap` an initiative;
   // `view: brainstorm` opens that initiative's brainstorm tree, and `ask` a question on it, opened.
@@ -635,6 +868,7 @@ function Board({ onAuthors }: { onAuthors: (dir: Record<string, string>) => void
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (!active) return;
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
         setPalette((o) => !o);
@@ -653,7 +887,7 @@ function Board({ onAuthors }: { onAuthors: (dir: Record<string, string>) => void
   });
   // What a look can check that the page's text cannot say.
   useEffect(() => {
-    (window as unknown as { __debug?: unknown }).__debug = () => ({
+    (window as unknown as { __boardDebug?: unknown }).__boardDebug = () => ({
       board: boardKey,
       mode,
       camera: cam.current,
@@ -746,16 +980,7 @@ function Board({ onAuthors }: { onAuthors: (dir: Record<string, string>) => void
         e.currentTarget.scrollLeft = 0;
       }}
     >
-      {present && (
-        <div className="sb-present-bar">
-          <div className="sb-present-line">{presenter.line ?? "Taking notes"}</div>
-          {looking && (
-            <button type="button" className="sb-btn sb-primary sb-follow" onClick={presenter.follow}>
-              Follow
-            </button>
-          )}
-        </div>
-      )}
+      {present && <div className="sb-present-line">{presenter.line ?? "Taking notes"}</div>}
       <div className={`sb-world${dimmed ? " sb-trace" : ""}`} ref={world} onTransitionEnd={drawThreads}>
         {think && tree && plan && b ? (
           <ThinkTree

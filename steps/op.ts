@@ -123,7 +123,12 @@ export default defineStep({
         return { op: cfg.op, ref_id: r.ref_id, text: `Chose "${clip(String(r.text ?? ""), 80)}".` };
       }
       case "unchoose": {
-        const r = await unchoose(ctx, need(cfg.ref_id, "ref_id"), cfg.reason?.trim() || "changed my mind", WHO);
+        const ref = need(cfg.ref_id, "ref_id");
+        const before = await get(ref);
+        const r = await unchoose(ctx, ref, cfg.reason?.trim() || "changed my mind", WHO);
+        // A choice said aloud on a recorded call: its lines go with it (the installed `_brainstorm` helper takes off only state_speaker/state_quote).
+        const callAloud = ["state_call_job", "state_call_lines"].filter((k) => before.properties[k] !== undefined && before.properties[k] !== null);
+        if (callAloud.length) await call(ctx, "graph/edit-node", { ref_id: ref, properties_to_be_deleted: callAloud }, WHO);
         return { op: cfg.op, ref_id: r.ref_id, text: `Took back "${clip(String(r.text ?? ""), 80)}".` };
       }
       case "remove": {

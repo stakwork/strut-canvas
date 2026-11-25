@@ -10,8 +10,8 @@ input:
   job: { type: string, required: false, description: "The job's id" }
   mode: { type: string, required: false, description: "read | write | brainstorm. Default: brainstorm when `brainstorm` is given, write when `plan` is" }
   about: { type: string, required: false, description: "The ref_id of the most specific card (initiative, milestone, feature, brief, story, requirement, brainstorm question or option). Left out: the top level, where a new initiative may be created" }
-  plan: { type: json, required: false, description: "write: the typed plan the agent decided (deletes can be restored)" }
-  brainstorm: { type: json, required: false, description: "brainstorm: { actions: [...] }, the draft the agent decided: adds, and chooses { op: choose, option, speaker, quote } only from a speaker's own transcript line" }
+  plan: { type: json, required: false, description: "write: the typed plan the agent decided (deletes can be restored). From a call, a story or requirement ({ text, ... }) may carry lines (the chunk's line numbers it came from), speaker and quote" }
+  brainstorm: { type: json, required: false, description: "brainstorm: { actions: [...] }, the draft the agent decided: adds, and chooses { op: choose, option, speaker, quote } only from a speaker's own transcript line; from a call, each may carry lines (the chunk's line numbers)" }
   root: { type: string, required: false, description: "brainstorm: the root question's ref_id, to continue a tree" }
   created_by_kind: { type: string, default: jamie, description: "jamie | strut" }
   allow_human: { type: boolean, default: false, description: "Only when the person asked to change or delete their own cards" }
@@ -130,6 +130,7 @@ steps:
       root: "{{ ctx.bs_input.root }}"
       about: "{{ ctx.bs_input.about }}"
       job: "{{ input.job || $job }}"
+      prompt: "{{ input.prompt }}"
   - id: after
     type: tree
     depends: apply
@@ -164,7 +165,8 @@ steps:
     config:
       plan: "{{ input.plan }}"
       context: "{{ ctx }}"
-      job: "{{ input.job }}"
+      job: "{{ input.job || $job }}"
+      prompt: "{{ input.prompt }}"
       created_by_kind: "{{ input.created_by_kind }}"
       allow_human: "{{ input.allow_human }}"
   - id: result
