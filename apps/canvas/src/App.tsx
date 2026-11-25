@@ -36,7 +36,7 @@ import { BuildPanel } from "./components/Build";
 import { Palette } from "./components/Palette";
 import { workFor } from "./lib/why";
 import { usePresenter } from "./lib/present";
-import { whyPlace } from "./lib/follow";
+import { watchLooking, whyPlace } from "./lib/follow";
 import type { Hit } from "./lib/search";
 
 const STATE_WORD: Record<State, string> = { idle: "Not started", prog: "In progress", done: "Done", block: "Blocked" };
@@ -121,6 +121,9 @@ function Board({ onAuthors }: { onAuthors: (dir: Record<string, string>) => void
   const toolInput = useToolInput<Record<string, string>>();
   // Presented (`present: <job>`): what Jamie shows a call. It follows that job's writes (lib/present.ts).
   const present = typeof toolInput?.["present"] === "string" && toolInput["present"] ? toolInput["present"] : null;
+  const presenter = usePresenter(present, base, b, why);
+  /** Presented, and a person is looking around it: nothing moves the camera but them. */
+  const looking = !!present && !presenter.following;
   const host = useHost();
   // The canvas always opens on the home map (the Board's rule): where the viewer was is not restored.
   // Earlier versions kept it in app state ("board", "camera"); an open clears those keys.
@@ -262,14 +265,18 @@ function Board({ onAuthors }: { onAuthors: (dir: Record<string, string>) => void
     },
     [layout, goal, apply, inset, right, think, tree],
   );
-  // A new board, or more of it shown: frame it. Brainstorms arriving on the shelf do not move the camera.
-  const framed = useRef("");
+  // A new board, or more of it shown: frame it. Brainstorms arriving on the shelf do not move the camera, nor do new
+  // cards while a person looks around a presented canvas.
+  const framed = useRef({ board: "", more: "" });
   useLayoutEffect(() => {
-    const key = `${goal ?? HOME}/${shown.length}/${plan ? Object.keys(plan.cards).length : 0}/${inset}/${think}/${think && !!tree}`;
-    if (framed.current === key) return;
-    framed.current = key;
+    const board = `${goal ?? HOME}/${inset}/${think}/${think && !!tree}`;
+    const more = `${shown.length}/${plan ? Object.keys(plan.cards).length : 0}`;
+    const was = framed.current;
+    if (was.board === board && was.more === more) return;
+    framed.current = { board, more };
+    if (was.board === board && looking) return;
     fit();
-  }, [fit, goal, shown.length, plan, think, tree]);
+  }, [fit, goal, shown.length, plan, think, tree, looking]);
 
   /** Bring a box of the world into view, moving the camera as little as it can; it never zooms out below 0.5. */
   const reveal = useCallback(
@@ -558,7 +565,12 @@ function Board({ onAuthors }: { onAuthors: (dir: Record<string, string>) => void
     }
     goTo(h.id);
   };
-  const presenter = usePresenter(present, base, b, why);
+  // A person looking around the page (in a call tile; nobody touches the video): it stops following until Follow.
+  useEffect(() => {
+    const d = desk.current;
+    if (!present || !d) return;
+    return watchLooking(d, presenter.look);
+  }, [present, presenter.look]);
   useEffect(() => {
     const t = presenter.target;
     if (!t) return;
@@ -734,7 +746,16 @@ function Board({ onAuthors }: { onAuthors: (dir: Record<string, string>) => void
         e.currentTarget.scrollLeft = 0;
       }}
     >
-      {present && <div className="sb-present-line">{presenter.line ?? "Taking notes"}</div>}
+      {present && (
+        <div className="sb-present-bar">
+          <div className="sb-present-line">{presenter.line ?? "Taking notes"}</div>
+          {looking && (
+            <button type="button" className="sb-btn sb-primary sb-follow" onClick={presenter.follow}>
+              Follow
+            </button>
+          )}
+        </div>
+      )}
       <div className={`sb-world${dimmed ? " sb-trace" : ""}`} ref={world} onTransitionEnd={drawThreads}>
         {think && tree && plan && b ? (
           <ThinkTree

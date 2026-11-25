@@ -358,9 +358,10 @@ button.sb-jchip:hover { color: var(--sb-ink); }
   .sb-tile.sb-s-prog { animation: none; }
 }
 
-/* Presented (`present: <job>`): the canvas as Jamie shows it in a call. Nobody steers it, so no controls;
-   the cards the job just wrote are marked, and a line says what it is doing. */
-.sb-present > :not(.sb-world):not(.sb-threads):not(.sb-present-line):not(.sb-why) { display: none !important; }
+/* Presented (`present: <job>`): the canvas as Jamie shows it in a call. Nobody steers the video, so no controls;
+   the cards the job just wrote are marked, and a line says what it is doing. A person looking around the page
+   itself (in a call tile) gets Follow beside the line. */
+.sb-present > :not(.sb-world):not(.sb-threads):not(.sb-present-bar):not(.sb-why) { display: none !important; }
 /* What only a person at the canvas can press. */
 .sb-present .bt-tools, .sb-present .bt-opt .sb-row-btns, .sb-present .bt-fold, .sb-present .sb-more-row,
 .sb-present .sb-why-head .sb-btn, .sb-present .sb-why .sb-link, .sb-present .sb-why .sb-add, .sb-present .sb-story-tools,
@@ -368,8 +369,10 @@ button.sb-jchip:hover { color: var(--sb-ink); }
 .sb-present { cursor: default; }
 .sb-fresh { animation: sb-fresh 2s ease-out 4; box-shadow: 0 0 0 3px var(--sb-prog), var(--sb-shadow); }
 @keyframes sb-fresh { from { box-shadow: 0 0 0 0 color-mix(in srgb, var(--sb-prog) 55%, transparent), var(--sb-shadow); } to { box-shadow: 0 0 0 16px transparent, var(--sb-shadow); } }
+.sb-present-bar { position: absolute; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: 5; display: flex; align-items: center; gap: 8px; }
+/* Back to following, for a person who looked around the page in a call tile. */
+.sb-follow { height: 36px; box-shadow: var(--sb-shadow); cursor: pointer; }
 .sb-present-line {
-  position: absolute; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: 5;
   padding: 7px 16px; border-radius: 999px; background: var(--sb-paper); box-shadow: var(--sb-shadow);
   font-family: var(--sb-serif); font-size: 15px; color: var(--sb-muted); white-space: nowrap;
 }
