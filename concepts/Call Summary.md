@@ -24,7 +24,10 @@ page is how to write one.
 - **Open**: questions nobody answered, blockers, things left unfinished.
 
 Keep each point to one sentence, and call people by their first names.
-The transcript is noisy: a name or a product word may be misheard, so
-spell it the way most of the call spells it. A call with nothing of
-substance gets one Discussed point that says so, and the other lists stay
-empty.
+The transcript is noisy: a name or a product word may be misheard. When
+the team's own words are listed, a word that sounds like one of them and
+stands where it would stand is that word: write it as listed, and leave
+an ordinary use of an ordinary word alone ("the game at the stadium" is a
+stadium). Any other name, spell the way most of the call spells it. A
+call with nothing of substance gets one Discussed point that says so, and
+the other lists stay empty.

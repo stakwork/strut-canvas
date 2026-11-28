@@ -63,6 +63,15 @@ describe("stadeum/canvas", () => {
   };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const find = async (type: string): Promise<any[]> => (await page("graph/find", { node_type: type, where: { removed_at: null }, limit: 500 })).result?.nodes ?? [];
+  /** A run launched detached, followed to its end: its events. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const ended = async (workflow: string, runId: string): Promise<any[]> => {
+    for (let i = 0; i < 300; i++) {
+      if (await store.getRunSummary(workflow, runId)) return store.getRunEvents(workflow, runId);
+      await new Promise((ok) => setTimeout(ok, 100));
+    }
+    throw new Error(`run ${runId} of ${workflow} did not end`);
+  };
   /** A step run over HTTP with the deployment key, as the voice service calls it for the person recording. Its output, or it throws with the step's error. */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const server = async (type: string, config: Record<string, unknown>, actor = "ada"): Promise<any> => {
@@ -373,15 +382,6 @@ describe("stadeum/canvas", () => {
     const line = (n: number, s: number, speaker: string, text: string, identity?: string) => ({ n, at: at(s), speaker, source: speaker === "Jamie" ? "jamie" : "voice", text, ...(identity ? { identity } : {}) });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const listed = async (): Promise<any> => (await page("stadeum/canvas/calls", {})).result?.calls.find((c: { job: string }) => c.job === CALL);
-    /** A run launched detached, followed to its end: its events. */
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const ended = async (workflow: string, runId: string): Promise<any[]> => {
-      for (let i = 0; i < 300; i++) {
-        if (await store.getRunSummary(workflow, runId)) return store.getRunEvents(workflow, runId);
-        await new Promise((ok) => setTimeout(ok, 100));
-      }
-      throw new Error(`run ${runId} of ${workflow} did not end`);
-    };
 
     const first = await server("stadeum/canvas/transcript-append", {
       job: CALL,
@@ -435,12 +435,7 @@ describe("stadeum/canvas", () => {
   });
 
   it("keeps a word corrected in a transcript in the server's vocabulary, the one dictation uses", async () => {
-    // The vocabulary is strut's own (memory/lexicon, dictation/*). Today strut keeps one on a LadybugDB graph only:
-    // on Neo4j the page finds none and shows the transcript as it is, until strut's vocabulary is there too.
-    if (process.env["CANVAS_TEST_NEO4J_URI"]) {
-      assert.match(String((await page("memory/lexicon", {})).error), /Ladybug/);
-      return;
-    }
+    // The vocabulary is strut's own (memory/lexicon, dictation/*), on a LadybugDB file and on Neo4j alike.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const heardAs = async (): Promise<any[]> => ((await page("memory/lexicon", {})).result?.entities ?? []).flatMap((e: any) => (e.heard ?? []).map((h: any) => [h.value, h.form ?? e.name]));
     assert.deepEqual(await heardAs(), []);
@@ -454,6 +449,18 @@ describe("stadeum/canvas", () => {
     assert.deepEqual(await heardAs(), []);
     // The app declares no graph type of its own for it.
     assert.doesNotMatch(await readFile(join(HERE, "apps/canvas/app.yaml"), "utf8"), /^data:|graph\/create-node/m);
+
+    // A call's summary is told the team's words, the vocabulary's, to spell as written. With none, it is told nothing.
+    const SUMMARIZE = "stadeum/canvas/summarize";
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const summarized = async (): Promise<any[]> => ended(SUMMARIZE, (await page("run/launch", { workflow: SUMMARIZE, input: { job: "call-rec1" } })).result.runId);
+    const told = /The team's own words, written exactly so: /;
+    assert.doesNotMatch(JSON.stringify(await summarized()), told);
+    assert.equal((await page("dictation/add", { heard: "stack work", written: "Stakwork" })).error, undefined);
+    const events = await summarized();
+    const words = events.find((e) => e.type === "step.end" && Array.isArray(e.output?.entities));
+    assert.deepEqual(words?.output.entities.map((e: { name: string }) => e.name), ["Stakwork"]);
+    assert.match(JSON.stringify(events), /The team's own words, written exactly so: Stakwork\. Where the transcript means one of them/);
   });
 
   it("ships its pages", async () => {

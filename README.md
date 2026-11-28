@@ -41,7 +41,10 @@ Canvas job, which writes the cards). Beside it, in that job's files:
   transcript. It starts by itself when a recording stops (the first
   `end: true`), and from Summarize on a call that has none. How a summary
   is written is the **Call Summary** page; the workflow keeps the reads,
-  the shape and the rule that the transcript is data.
+  the shape and the rule that the transcript is data. The model is also
+  given the team's own words (the server's vocabulary: every word of the
+  lingo type or with a mishearing), so a summary writes "Stadeum" where the
+  transcript heard "stadium" and meant it.
 - **The Calls page** (the app's Calls button, or `view=calls` in its
   link, with `call=<job>` to open on one): every recorded call, newest
   first, with who spoke and how long, its summary, and its transcript one

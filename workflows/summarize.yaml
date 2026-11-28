@@ -2,7 +2,7 @@ description: >-
   Summarize a recorded call: a title and what was discussed, decided, taken on and left open, kept with the
   call for the Calls page. Starts by itself when a recording stops, and from the page's Summarize. How a
   summary is written is the Call Summary page; this file keeps the reads, the shape and the rules no page
-  may loosen. A call with nothing said is left without one. Input { job: call-… }. Output { job, summarized, title }.
+  may loosen. The model is given the team's own words from this server's vocabulary, to spell as written. A call with nothing said is left without one. Input { job: call-… }. Output { job, summarized, title }.
 input:
   job: { type: string, description: "The recorded call's job, call-…" }
 steps:
@@ -23,9 +23,23 @@ steps:
     config:
       name: Call Summary
       tool: ""
+  # The team's own words: this server's vocabulary (the one dictation uses, and where a word corrected in a
+  # transcript is kept), for the model to spell as they are written. Only words someone taught: one of the lingo
+  # type, or with a mishearing. A server that keeps no vocabulary has none, and the summary is written without.
+  - id: words
+    type: memory/lexicon
+    depends: gate
+    when: true
+    config: {}
+    options:
+      onError:
+        id: no_words
+        type: pack
+        config:
+          entities: []
   - id: write
     type: llm
-    depends: page
+    depends: [page, words]
     config:
       prompt: |
         Write the summary of a recorded call, for the people who were on it and for those who missed it.
@@ -43,6 +57,8 @@ steps:
         A list with nothing to say is an empty list.
 
         {{ page.text }}
+
+        {{ words.entities.filter(e => e.type === words.lingo_type || e.heard.length > 0).length > 0 ? "The team's own words, written exactly so: " + words.entities.filter(e => e.type === words.lingo_type || e.heard.length > 0).slice(0, 300).map(e => e.name).join(', ') + ". Where the transcript means one of them and writes it another way, it was misheard: write the team's word." : "" }}
 
         <transcript>
         {{ call.text }}
