@@ -213,7 +213,8 @@ function Shell({ onAuthors }: { onAuthors: (dir: Record<string, string>) => void
     return { byCard, open: openLine };
   }, [allRefs]);
   const cited = useMemo(() => (call ? citedBy(allRefs, call) : new Map<number, CallRef[]>()), [allRefs, call]);
-  const callTitle = (calls.data?.find((c) => c.job === call)?.title ?? (call ? `Call ${call.replace(/^call-/, "").slice(0, 8)}` : "")) || "A call";
+  // The call is "The call": no raw date stamp in the title (the Calls list shows when it was).
+  const callTitle = "The call";
 
   // What a look checks that the page's text cannot say.
   useEffect(() => {

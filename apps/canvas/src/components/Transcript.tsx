@@ -7,6 +7,8 @@
 // scroll it, or Play it at the call's pace.
 import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { useChannel } from "@strut/kit";
+import { CorrectPopup, LineText, useLingo, type Pick } from "./Lingo";
+import { cleanWord } from "../lib/lingo";
 import type { CallState, CallJob } from "../lib/call";
 import { bubblesOf, colourOf, initials, KIND_WORD, paceOf, simFrames, type CallRef, type Line, type Speaking } from "../lib/transcript";
 
@@ -118,6 +120,8 @@ export function TranscriptView({
   onReplay: (r: { playing: boolean; shown: number; speed: number; marked: number | null }) => void;
 }) {
   const stream = useRef<HTMLDivElement>(null);
+  const lingo = useLingo();
+  const [pick, setPick] = useState<Pick | null>(null);
   const [playing, setPlaying] = useState(false);
   const [cursor, setCursor] = useState<number | null>(null);
   const [speed, setSpeed] = useState(1);
@@ -261,7 +265,11 @@ export function TranscriptView({
               {b.lines.map((l) => (
                 <p key={l.n} data-n={l.n} className={marked === l.n ? "tv-marked" : ""}>
                   <small className="tv-n">{l.n}</small>
-                  {l.text}
+                  <LineText
+                    text={l.text}
+                    entries={lingo.entries}
+                    onPick={(heard, ev) => setPick({ x: ev.clientX, y: ev.clientY, heard: cleanWord(heard) || heard, line: l.n, speaker: b.speaker, context: l.text })}
+                  />
                   {(cited.get(l.n) ?? []).map((r) => (
                     <button key={`${r.id}${r.kind}`} type="button" className="tv-cite" title={r.title} onClick={() => onOpenCard(r)}>
                       → {KIND_WORD[r.kind]}: {r.title.length > 42 ? `${r.title.slice(0, 42)}…` : r.title}
@@ -291,6 +299,13 @@ export function TranscriptView({
         </div>
       </div>
 
+      {pick && (
+        <CorrectPopup
+          pick={pick}
+          onClose={() => setPick(null)}
+          onSave={(e) => lingo.add({ ...e, call: job })}
+        />
+      )}
       <footer className="tv-foot">
         {!following && (
           <button type="button" className="sb-btn tv-live" onClick={() => setFollowing(true)}>

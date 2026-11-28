@@ -165,7 +165,7 @@ export function useCalls(enabled: boolean) {
       const r = await client.run<{ calls?: Array<{ job: string; title?: string; usedAt?: string; createdAt?: string; busy?: unknown }> }>("stadeum/canvas/calls", { limit: 100 });
       return (r.calls ?? [])
         .filter((j) => j.job.startsWith("call-"))
-        .map((j) => ({ job: j.job, title: j.title?.trim() || "A call", at: Date.parse(j.createdAt ?? j.usedAt ?? "") || 0, busy: !!j.busy }))
+        .map((j) => ({ job: j.job, title: "The call", at: Date.parse(j.createdAt ?? j.usedAt ?? "") || 0, busy: !!j.busy }))
         .sort((a, b) => b.at - a.at);
     },
   });

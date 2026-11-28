@@ -471,3 +471,13 @@ button.sb-jchip:hover { color: var(--sb-ink); }
 .tv-live-dot { display: inline-block; width: 8px; height: 8px; margin-left: 4px; border-radius: 50%; background: #d23c3c; animation: tv-blink 1.4s ease-in-out infinite; }
 .tv-count { padding: 0 8px; color: var(--sb-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 @media (prefers-reduced-motion: reduce) { .cv-pulse, .tv-speaking, .tv-dots i, .tv-live-dot { animation: none; } }
+
+/* Lingo: a corrected word in the transcript, and the popup that makes one */
+.lg-fixed { background: color-mix(in srgb, var(--sb-grain, #c9a227) 28%, transparent); border-radius: 3px; padding: 0 2px; cursor: context-menu; border-bottom: 1px dotted currentColor; }
+.lg-w:hover { background: color-mix(in srgb, currentColor 8%, transparent); border-radius: 3px; }
+.lg-pop { position: fixed; z-index: 60; width: 280px; display: grid; gap: 8px; padding: 12px; background: var(--sb-paper, #fff); color: inherit; border: 1px solid var(--sb-grain, #ccc); border-radius: 10px; box-shadow: 0 8px 28px rgba(0,0,0,.22); font: 13px ui-sans-serif, system-ui, sans-serif; }
+.lg-pop h4 { margin: 0; font: 600 13px ui-sans-serif, system-ui, sans-serif; }
+.lg-pop label { display: grid; gap: 3px; color: var(--sb-muted, #666); font-size: 11px; }
+.lg-pop input { font: 14px ui-sans-serif, system-ui, sans-serif; padding: 5px 8px; border: 1px solid var(--sb-grain, #ccc); border-radius: 6px; background: transparent; color: inherit; }
+.lg-row { display: flex; justify-content: flex-end; gap: 6px; }
+.lg-mark { margin-left: 1px; font-size: 8px; color: var(--sb-muted, #8a6d1d); vertical-align: super; line-height: 0; user-select: none; }

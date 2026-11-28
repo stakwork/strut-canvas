@@ -36,5 +36,11 @@ grants:
     - github/pr-status
     - github/merge-pr
     - secret/add
+    # Lingo: a correction made in the transcript is written as a Lingo node.
+    - graph/create-node
   sqlite: false
   automations: []
+data:
+  graph:
+    types:
+      Lingo: { name: string, heard: string, corrected: string, call: string?, line: number?, speaker: string?, context: string?, corrected_at: string?, key: [name], search: [name, heard, corrected] }
