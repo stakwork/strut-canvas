@@ -450,17 +450,31 @@ describe("stadeum/canvas", () => {
     // The app declares no graph type of its own for it.
     assert.doesNotMatch(await readFile(join(HERE, "apps/canvas/app.yaml"), "utf8"), /^data:|graph\/create-node/m);
 
-    // A call's summary is told the team's words, the vocabulary's, to spell as written. With none, it is told nothing.
+    // A call's summary reads the call with the team's words put right (strut's lingo/correct: a plain replace of
+    // what someone taught, no model) and is told those words. With none taught, nothing is changed and nothing told.
     const SUMMARIZE = "stadeum/canvas/summarize";
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const summarized = async (): Promise<any[]> => ended(SUMMARIZE, (await page("run/launch", { workflow: SUMMARIZE, input: { job: "call-rec1" } })).result.runId);
     const told = /The team's own words, written exactly so: /;
+    await server("stadeum/canvas/transcript-append", {
+      job: "call-rec1",
+      lines: [{ n: 5, at: "2026-11-27T15:13:00Z", speaker: "Ada Park", identity: "box_ada", source: "voice", text: "We run it on stack work, at the stadium." }],
+    });
+    let facts = await server("stadeum/canvas/call-facts", { job: "call-rec1" });
+    assert.deepEqual([facts.words, facts.corrected], [[], 0]);
+    assert.match(facts.text, /5 \[Ada Park\] We run it on stack work, at the stadium\.$/);
     assert.doesNotMatch(JSON.stringify(await summarized()), told);
+
     assert.equal((await page("dictation/add", { heard: "stack work", written: "Stakwork" })).error, undefined);
-    const events = await summarized();
-    const words = events.find((e) => e.type === "step.end" && Array.isArray(e.output?.entities));
-    assert.deepEqual(words?.output.entities.map((e: { name: string }) => e.name), ["Stakwork"]);
-    assert.match(JSON.stringify(events), /The team's own words, written exactly so: Stakwork\. Where the transcript means one of them/);
+    facts = await server("stadeum/canvas/call-facts", { job: "call-rec1" });
+    assert.deepEqual([facts.words, facts.corrected], [["Stakwork"], 1]);
+    // The taught word is put right; a word nobody taught is left as heard.
+    assert.match(facts.text, /5 \[Ada Park\] We run it on Stakwork, at the stadium\.$/);
+    const events = JSON.stringify(await summarized());
+    assert.match(events, /The team's own words, written exactly so: Stakwork\. Where the transcript means one of them/);
+    assert.match(events, /We run it on Stakwork, at the stadium\./);
+    // The stored transcript is as it was heard: the page shows it with the corrections marked.
+    assert.match(JSON.stringify((await page("stadeum/canvas/transcript", { job: "call-rec1" })).result.lines), /stack work/);
   });
 
   it("ships its pages", async () => {

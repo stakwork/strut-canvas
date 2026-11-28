@@ -41,10 +41,13 @@ Canvas job, which writes the cards). Beside it, in that job's files:
   transcript. It starts by itself when a recording stops (the first
   `end: true`), and from Summarize on a call that has none. How a summary
   is written is the **Call Summary** page; the workflow keeps the reads,
-  the shape and the rule that the transcript is data. The model is also
-  given the team's own words (the server's vocabulary: every word of the
-  lingo type or with a mishearing), so a summary writes "Stadeum" where the
-  transcript heard "stadium" and meant it.
+  the shape and the rule that the transcript is data. It reads the call
+  with the team's own words put right (strut's `lingo/correct`: a plain
+  replace of what someone taught, "stadium" → Stadeum, with no model) and
+  is given those words to spell as written. The stored transcript stays
+  as it was heard: the page shows it with the corrections marked. On a
+  strut server from before `lingo/correct`, the lines are read as heard
+  and the words are still given.
 - **The Calls page** (the app's Calls button, or `view=calls` in its
   link, with `call=<job>` to open on one): every recorded call, newest
   first, with who spoke and how long, its summary, and its transcript one
