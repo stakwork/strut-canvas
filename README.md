@@ -48,6 +48,18 @@ Canvas job, which writes the cards). Beside it, in that job's files:
   click away. It reads `calls`, which reads the two small files per call
   and never a transcript.
 
+### Lingo: correcting a word in a transcript
+
+Right-click a word in a call's transcript (or select a few and
+right-click) to say what it should have been. The pair goes into the
+server's vocabulary, the one strut's dictation uses (`dictation/add`: the
+word, and how it was heard), and every line of every call is shown with
+that vocabulary's corrections (`memory/lexicon`), each marked and showing
+what was heard. Undo on the toast takes the last one back
+(`dictation/undo`). The app keeps no type of its own for this. On a
+server whose strut keeps no vocabulary the transcript is plain text and
+there is nothing to right-click.
+
 ## The graph
 
 | Type | Holds | Links |

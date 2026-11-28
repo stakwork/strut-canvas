@@ -68,7 +68,8 @@ export function toRecording(raw: unknown): Recording | null {
   });
   return {
     job,
-    title: summary?.title || text(r["title"]) || "A call",
+    // Its summary's title once it has one. Until then "The call", never the job's date stamp: the list says when it was.
+    title: summary?.title || "The call",
     at: time(r["startedAt"]) || time(r["createdAt"]) || time(r["usedAt"]),
     endedAt: time(r["endedAt"]),
     busy,

@@ -30,7 +30,9 @@ describe("a recorded call, as the Calls page lists it", () => {
     const old = toRecording({ job: "call-old", title: "Call notes", usedAt: iso(5), busy: false })!;
     assert.deepEqual([old.done, old.at, old.endedAt, old.lines, old.summary, old.people.length], [true, T + 5 * 60_000, 0, null, null, 0]);
     assert.equal(toRecording({ job: "call-live", busy: true })!.done, false);
-    assert.equal(toRecording({ job: "call-live", busy: true })!.title, "A call");
+    // No summary: "The call", never the job's date stamp.
+    assert.equal(toRecording({ job: "call-live", busy: true })!.title, "The call");
+    assert.equal(old.title, "The call");
     // A summary with no title is no summary; a job that is not a call is not listed.
     assert.equal(toRecording({ job: "call-x", summary: { title: " ", discussed: ["A"] } })!.summary, null);
     assert.equal(toRecording({ job: "job-1", title: "A build" }), null);

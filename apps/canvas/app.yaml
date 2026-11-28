@@ -36,5 +36,10 @@ grants:
     - github/pr-status
     - github/merge-pr
     - secret/add
+    # Lingo: a word corrected in the transcript goes into this server's vocabulary, the one dictation uses, and the
+    # transcript is shown with that vocabulary's corrections. Undo takes the last one back.
+    - memory/lexicon
+    - dictation/add
+    - dictation/undo
   sqlite: false
   automations: []

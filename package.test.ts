@@ -434,6 +434,28 @@ describe("stadeum/canvas", () => {
     await ended(SUMMARIZE, launched.result.runId);
   });
 
+  it("keeps a word corrected in a transcript in the server's vocabulary, the one dictation uses", async () => {
+    // The vocabulary is strut's own (memory/lexicon, dictation/*). Today strut keeps one on a LadybugDB graph only:
+    // on Neo4j the page finds none and shows the transcript as it is, until strut's vocabulary is there too.
+    if (process.env["CANVAS_TEST_NEO4J_URI"]) {
+      assert.match(String((await page("memory/lexicon", {})).error), /Ladybug/);
+      return;
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const heardAs = async (): Promise<any[]> => ((await page("memory/lexicon", {})).result?.entities ?? []).flatMap((e: any) => (e.heard ?? []).map((h: any) => [h.value, h.form ?? e.name]));
+    assert.deepEqual(await heardAs(), []);
+    // What the page's "Correct the transcript" saves: how it was heard, and how it is written.
+    const saved = await page("dictation/add", { heard: "stack work", written: "Stakwork" });
+    assert.equal(saved.error, undefined, JSON.stringify(saved));
+    assert.deepEqual(await heardAs(), [["stack work", "Stakwork"]]);
+    // Undo on the toast takes it back.
+    assert.ok(saved.result.undo.length > 0);
+    assert.equal((await page("dictation/undo", { undo: saved.result.undo })).error, undefined);
+    assert.deepEqual(await heardAs(), []);
+    // The app declares no graph type of its own for it.
+    assert.doesNotMatch(await readFile(join(HERE, "apps/canvas/app.yaml"), "utf8"), /^data:|graph\/create-node/m);
+  });
+
   it("ships its pages", async () => {
     for (const name of ["Canvas Planning", "Brainstorm", "Brainstorm Method", "Brainstorm Framing", "Call Canvas", "Call Summary"]) {
       const text = await readFile(join(HERE, "concepts", `${name}.md`), "utf8");
