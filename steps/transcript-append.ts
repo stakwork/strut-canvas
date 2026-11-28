@@ -9,6 +9,39 @@ interface Line { n: number; at: string; speaker: string; identity?: string; sour
 const FILE = "transcript.jsonl";
 /** Written when voice says the recording stopped (`transcript-append { end: true }`). */
 const END_FILE = "transcript.end";
+/** What the Calls page lists a call by, rewritten with each batch: who spoke, from when to when, how many lines. */
+const FACTS_FILE = "call.json";
+/** The workflow that writes a call's summary, started when its recording stops. */
+const SUMMARIZE = "stadeum/canvas/summarize";
+interface Person { name: string; identity?: string }
+/** A call's facts, counted from its lines: the people who spoke (never Jamie), in the order of their first line. */
+function factsOf(lines: Line[], done: boolean) {
+  const people = new Map<string, Person>();
+  let first = Infinity;
+  let last = -Infinity;
+  for (const l of lines) {
+    const t = Date.parse(l.at);
+    if (Number.isFinite(t)) { first = Math.min(first, t); last = Math.max(last, t); }
+    if (l.source === "jamie") continue;
+    const key = l.identity ?? l.speaker;
+    if (!people.has(key)) people.set(key, { name: l.speaker, ...(l.identity ? { identity: l.identity } : {}) });
+  }
+  const span = Number.isFinite(first) ? { startedAt: new Date(first).toISOString(), endedAt: new Date(last).toISOString() } : {};
+  return { people: [...people.values()], ...span, lines: lines.length, done };
+}
+/** Starts the call's summary. Never fails the append: the Calls page can run it again. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function summarize(ctx: any, job: string): Promise<string | undefined> {
+  try {
+    const def = ctx?.registry?.["run/launch"];
+    if (!def) return undefined;
+    const out = await def.run(def.input.parse({ workflow: SUMMARIZE, input: { job }, key: `call-summary:${job}` }), ctx);
+    return typeof out?.runId === "string" ? out.runId : undefined;
+  } catch (e) {
+    console.warn(`${WHO}: the summary of ${job} did not start: ${String((e as Error)?.message ?? e)}`);
+    return undefined;
+  }
+}
 /** A call's scribe job: `call-<hex>` as the box names it. Also what keeps a path out of any other job. */
 const CALL_JOB = /^call-[A-Za-z0-9_-]{1,64}$/;
 function callJob(job: string, who: string): string {
@@ -58,7 +91,12 @@ function serial<T>(job: string, f: () => Promise<T>): Promise<T> {
  * (`POST /steps/stadeum/canvas/transcript-append/run`, the deployment key,
  * `x-strut-actor` the recorder) with each batch of settled lines; an `n` the
  * file already has is skipped, so a retry is safe. `end: true` when the
- * recording stopped: `transcript` then answers `done`.
+ * recording stopped: `transcript` then answers `done`, and the call's
+ * summary is started (workflows/summarize.yaml), once.
+ *
+ * Each batch also rewrites `<job dir>/call.json`: who spoke, from when to
+ * when and how many lines, so the Calls list reads a small file per call
+ * instead of every transcript.
  */
 export default defineStep({
   type: "stadeum/canvas/transcript-append",
@@ -66,13 +104,14 @@ export default defineStep({
   description:
     "Append a recorded call's settled lines to its scribe job's transcript (<job dir>/transcript.jsonl, one JSON object a line: " +
     "{ n, at (ISO), speaker, identity?, source: voice|chat|jamie, text }). An n already stored is skipped, so a retry is safe. " +
-    "`end: true` marks the recording stopped. Input { job: call-…, lines: [...], end? }. Output { count, skipped, last } — count: the lines written now.",
+    "`end: true` marks the recording stopped and, the first time, starts the call's summary. " +
+    "Input { job: call-…, lines: [...], end? }. Output { count, skipped, last, summarizing? } — count: the lines written now; summarizing: the summary's run.",
   input: z.object({
     job: z.string().describe("The call's scribe job, call-…"),
     lines: z.array(LineIn).default([]),
     end: z.boolean().default(false).describe("The recording stopped: nothing more will come"),
   }),
-  output: z.object({ count: z.number().int(), skipped: z.number().int(), last: z.number().int().nullable() }),
+  output: z.object({ count: z.number().int(), skipped: z.number().int(), last: z.number().int().nullable(), summarizing: z.string().optional() }),
   async run(cfg, ctx) {
     const job = callJob(cfg.job, WHO);
     const lines: Line[] = cfg.lines.map((l) => {
@@ -92,8 +131,13 @@ export default defineStep({
       return r.stdout;
     };
     return serial(job, async () => {
-      const stored = await sh(`mkdir -p "$1" && touch "$1/${FILE}" && cat "$1/${FILE}"`);
-      const have = new Set(parseJsonl(stored).map((l) => l.n));
+      // The first line out says whether the recording had already stopped; the rest is the file.
+      const read = await sh(`mkdir -p "$1" && touch "$1/${FILE}" && { [ -e "$1/${END_FILE}" ] && echo ended || echo open; } && cat "$1/${FILE}"`);
+      const cut = read.indexOf("\n");
+      const endedBefore = read.slice(0, cut) === "ended";
+      const stored = read.slice(cut + 1);
+      const kept = parseJsonl(stored);
+      const have = new Set(kept.map((l) => l.n));
       // A line torn by a crash ends without a newline: the next one starts on a line of its own.
       const lead = stored && !stored.endsWith("\n") ? "\n" : "";
       const fresh: Line[] = [];
@@ -104,7 +148,13 @@ export default defineStep({
       }
       if (fresh.length) await sh(`cat >> "$1/${FILE}"`, lead + fresh.map((l) => JSON.stringify(l)).join("\n") + "\n");
       if (cfg.end) await sh(`date -u +%Y-%m-%dT%H:%M:%SZ > "$1/${END_FILE}"`);
-      return { count: fresh.length, skipped: lines.length - fresh.length, last: have.size ? Math.max(...have) : null };
+      const all = [...kept, ...fresh];
+      if (fresh.length || cfg.end) {
+        const facts = factsOf(all, cfg.end || endedBefore);
+        await sh(`cat > "$1/${FACTS_FILE}.tmp" && mv "$1/${FACTS_FILE}.tmp" "$1/${FACTS_FILE}"`, JSON.stringify(facts) + "\n");
+      }
+      const summarizing = cfg.end && !endedBefore && all.length ? await summarize(ctx, job) : undefined;
+      return { count: fresh.length, skipped: lines.length - fresh.length, last: have.size ? Math.max(...have) : null, ...(summarizing ? { summarizing } : {}) };
     });
   },
 });

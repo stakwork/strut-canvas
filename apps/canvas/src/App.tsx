@@ -38,9 +38,10 @@ import { workFor } from "./lib/why";
 import { usePresenter } from "./lib/present";
 import { shownAs, whyPlace } from "./lib/follow";
 import type { Hit } from "./lib/search";
-import { useCall, useCalls } from "./lib/call";
+import { useCall, useCalls, useSummarize } from "./lib/call";
 import { citedBy, type CallRef } from "./lib/transcript";
-import { CallLinksContext, CallsMenu, ChannelTap, TranscriptView, type CallLinks, type Focus } from "./components/Transcript";
+import { CallLinksContext, ChannelTap, TranscriptView, type CallLinks, type Focus } from "./components/Transcript";
+import { CallsPage } from "./components/Calls";
 
 const STATE_WORD: Record<State, string> = { idle: "Not started", prog: "In progress", done: "Done", block: "Blocked" };
 const ROLE_WORD: Record<Role, string> = { goal: "Initiative", group: "Milestone", work: "Feature" };
@@ -107,9 +108,10 @@ const PULSE_MS = 4_000;
 /** The two views of the canvas — the planning map and a call's transcript — one in front, the other live in a small
  *  window in the bottom left that swaps them on a click and pulses when what it shows changes. A recorded call
  *  (`present=<job>`) opens on its transcript, following it; the call's first initiative written by the scribe
- *  switches to the planning view on it, unless the person has used the toggle. Deep links: `present=<job>` (or
- *  `call=<job>`, a call opened without presenting), `view=plan|transcript`, `line=<n>`; `sim=1` plays fixture
- *  channel frames (a look's check of the merge). */
+ *  switches to the planning view on it, unless the person has used the toggle. Over both, the Calls page: every
+ *  recorded call with its summary. Deep links: `present=<job>` (or `call=<job>`, a call opened without presenting),
+ *  `view=plan|transcript|calls` (calls: the Calls page, on `call` when it names one), `line=<n>`; `sim=1` plays
+ *  fixture channel frames (a look's check of the merge). */
 function Shell({ onAuthors }: { onAuthors: (dir: Record<string, string>) => void }) {
   const input = useToolInput<Record<string, string>>();
   const str = (k: string) => (typeof input?.[k] === "string" && input[k] ? String(input[k]) : null);
@@ -126,6 +128,7 @@ function Shell({ onAuthors }: { onAuthors: (dir: Record<string, string>) => void
     tookLink.current = true;
     if (c) setCall(c);
     setViewRaw(str("view") === "plan" ? "plan" : c || str("view") === "transcript" || linkLine !== null ? "transcript" : "plan");
+    if (str("view") === "calls") setCallsOpen(true);
     if (linkLine !== null) setFocus({ n: linkLine, k: 1 });
   }, [input]);
   /** The person used the toggle (or the small window): the first initiative no longer switches the view. */
@@ -135,7 +138,8 @@ function Shell({ onAuthors }: { onAuthors: (dir: Record<string, string>) => void
   const [focus, setFocus] = useState<Focus | null>(linkLine !== null ? { n: linkLine, k: 1 } : null);
   const [jump, setJump] = useState<{ id: string; n: number } | null>(null);
   const [refs, setRefs] = useState<CallRef[]>([]);
-  const [callsOpen, setCallsOpen] = useState(false);
+  const [callsOpen, setCallsOpen] = useState(() => str("view") === "calls");
+  const summarizing = useSummarize();
   const [pulse, setPulse] = useState<{ n: number; why: string } | null>(null);
   const [channel, setChannel] = useState<boolean | null>(null);
   const [replay, setReplay] = useState<{ playing: boolean; shown: number; speed: number; marked: number | null }>({ playing: false, shown: 0, speed: 1, marked: null });
@@ -213,8 +217,8 @@ function Shell({ onAuthors }: { onAuthors: (dir: Record<string, string>) => void
     return { byCard, open: openLine };
   }, [allRefs]);
   const cited = useMemo(() => (call ? citedBy(allRefs, call) : new Map<number, CallRef[]>()), [allRefs, call]);
-  // The call is "The call": no raw date stamp in the title (the Calls list shows when it was).
-  const callTitle = "The call";
+  // The call's summary title once it has one; until then "The call": no raw date stamp (the Calls page shows when it was).
+  const callTitle = calls.data?.find((c) => c.job === call)?.title ?? "The call";
 
   // What a look checks that the page's text cannot say.
   useEffect(() => {
@@ -222,6 +226,7 @@ function Shell({ onAuthors }: { onAuthors: (dir: Record<string, string>) => void
       const board = (window as unknown as { __boardDebug?: () => unknown }).__boardDebug?.();
       return {
         view: shownView,
+        calls: callsOpen,
         call,
         present,
         toggled,
@@ -246,7 +251,9 @@ function Shell({ onAuthors }: { onAuthors: (dir: Record<string, string>) => void
   });
 
   const toggle = (v: View) => {
-    if (v === "transcript" && !call) return setCallsOpen((o) => !o);
+    // No call is open: Transcript has nothing to show but the calls to pick one from.
+    if (v === "transcript" && !call) return setCallsOpen(true);
+    setCallsOpen(false);
     setView(v, true);
   };
 
@@ -254,7 +261,7 @@ function Shell({ onAuthors }: { onAuthors: (dir: Record<string, string>) => void
     <CallLinksContext.Provider value={links}>
       <div className={`cv cv-${shownView}${call ? " cv-has-call" : ""}`}>
         <div className={`cv-layer ${shownView === "plan" ? "cv-main" : "cv-pip"}`} aria-hidden={shownView !== "plan"}>
-          <Board onAuthors={onAuthors} active={shownView === "plan"} jump={jump} onFresh={onFresh} onCallRefs={setRefs} />
+          <Board onAuthors={onAuthors} active={shownView === "plan" && !callsOpen} jump={jump} onFresh={onFresh} onCallRefs={setRefs} />
         </div>
         {call && (
           <div className={`cv-layer ${shownView === "transcript" ? "cv-main" : "cv-pip"}`} aria-hidden={shownView !== "transcript"}>
@@ -270,18 +277,28 @@ function Shell({ onAuthors }: { onAuthors: (dir: Record<string, string>) => void
           </button>
         )}
         <div className="cv-switch" role="group" aria-label="Which view">
-          <button type="button" className="sb-btn" aria-pressed={shownView === "plan"} onClick={() => toggle("plan")}>
+          <button type="button" className="sb-btn" aria-pressed={!callsOpen && shownView === "plan"} onClick={() => toggle("plan")}>
             Planning
           </button>
-          <button type="button" className="sb-btn" aria-pressed={shownView === "transcript"} onClick={() => toggle("transcript")}>
+          <button type="button" className="sb-btn" aria-pressed={!callsOpen && shownView === "transcript"} onClick={() => toggle("transcript")}>
             Transcript{call && !feed.done && (feed.live || feed.from === "stored") && <i className="tv-live-dot" />}
           </button>
           <i className="sb-sep" />
-          <button type="button" className="sb-btn sb-quietbtn" aria-expanded={callsOpen} onClick={() => setCallsOpen((o) => !o)}>
+          <button type="button" className="sb-btn" aria-pressed={callsOpen} onClick={() => setCallsOpen((o) => !o)}>
             Calls
           </button>
         </div>
-        {callsOpen && <CallsMenu calls={calls.data} loading={calls.isLoading} current={call} onPick={pickCall} />}
+        {callsOpen && (
+          <CallsPage
+            calls={calls.data}
+            loading={calls.isLoading}
+            error={calls.error ? (calls.error instanceof Error ? calls.error.message : String(calls.error)) : null}
+            current={call}
+            summarizing={summarizing}
+            onOpen={pickCall}
+            onClose={() => setCallsOpen(false)}
+          />
+        )}
         {call && <ChannelTap key={call} job={call} sim={sim} startN={feed.lines.length ? feed.lines[feed.lines.length - 1]!.n : feed.from === "none" ? 0 : null} ingest={feed.ingest} ingestStates={feed.ingestStates} onAvailable={setChannel} />}
       </div>
     </CallLinksContext.Provider>

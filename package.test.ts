@@ -63,6 +63,24 @@ describe("stadeum/canvas", () => {
   };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const find = async (type: string): Promise<any[]> => (await page("graph/find", { node_type: type, where: { removed_at: null }, limit: 500 })).result?.nodes ?? [];
+  /** A step run over HTTP with the deployment key, as the voice service calls it for the person recording. Its output, or it throws with the step's error. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const server = async (type: string, config: Record<string, unknown>, actor = "ada"): Promise<any> => {
+    const key = `key-${randomBytes(8).toString("hex")}`;
+    process.env["STRUT_API_KEY"] = key;
+    try {
+      const res = await strut.app.request(`/steps/${encodeURIComponent(type)}/run`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${key}`, "x-strut-actor": actor },
+        body: JSON.stringify({ config }),
+      });
+      const body = await res.json();
+      if (res.status !== 200 || body.error || body.status === "error") throw new Error(String(body.error?.message ?? body.error ?? JSON.stringify(body)));
+      return body.output ?? body;
+    } finally {
+      delete process.env["STRUT_API_KEY"];
+    }
+  };
 
   before(async () => {
     delete process.env["STRUT_API_KEY"];
@@ -344,8 +362,102 @@ describe("stadeum/canvas", () => {
     assert.equal(r.removed.length, 1);
   });
 
+  it("keeps a recorded call's facts beside its transcript, lists it, and stores its summary", async () => {
+    const CALL = "call-rec1";
+    const SUMMARIZE = "stadeum/canvas/summarize";
+    // The call's scribe job, as voice starts it: a run under the job (no model runs here).
+    const started = await strut.run(CANVAS, { mode: "read" }, { actor: "ada", principal: "ada", job: CALL, title: "Call, 27 Nov 15:02" });
+    assert.equal(started.status, "success");
+    const t0 = Date.parse("2026-11-27T15:02:00Z");
+    const at = (s: number) => new Date(t0 + s * 1000).toISOString();
+    const line = (n: number, s: number, speaker: string, text: string, identity?: string) => ({ n, at: at(s), speaker, source: speaker === "Jamie" ? "jamie" : "voice", text, ...(identity ? { identity } : {}) });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const listed = async (): Promise<any> => (await page("stadeum/canvas/calls", {})).result?.calls.find((c: { job: string }) => c.job === CALL);
+    /** A run launched detached, followed to its end: its events. */
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const ended = async (workflow: string, runId: string): Promise<any[]> => {
+      for (let i = 0; i < 300; i++) {
+        if (await store.getRunSummary(workflow, runId)) return store.getRunEvents(workflow, runId);
+        await new Promise((ok) => setTimeout(ok, 100));
+      }
+      throw new Error(`run ${runId} of ${workflow} did not end`);
+    };
+
+    const first = await server("stadeum/canvas/transcript-append", {
+      job: CALL,
+      lines: [line(1, 0, "Ada Park", "Let's ship the checklist first.", "box_ada"), line(2, 20, "Ben Ortiz", "Agreed. I'll write the invite emails.", "box_ben"), line(3, 30, "Jamie", "Noted.")],
+    });
+    assert.equal(first.count, 3);
+    assert.equal(first.summarizing, undefined);
+    // While it records: who spoke so far (never Jamie), not done, no summary, the job's own title.
+    let c = await listed();
+    assert.deepEqual(c.people, [{ name: "Ada Park", identity: "box_ada" }, { name: "Ben Ortiz", identity: "box_ben" }]);
+    assert.deepEqual([c.done, c.lines, c.summary, c.title], [false, 3, undefined, "Call, 27 Nov 15:02"]);
+
+    // The recording stops: the summary's run starts, once.
+    const last = await server("stadeum/canvas/transcript-append", { job: CALL, lines: [line(4, 600, "Ada Park", "Who owns pricing?", "box_ada")], end: true });
+    assert.match(String(last.summarizing), /\S/);
+    const again = await server("stadeum/canvas/transcript-append", { job: CALL, lines: [], end: true });
+    assert.equal(again.summarizing, undefined);
+    // It read the call and got as far as the model, which this test has none of.
+    const events = await ended(SUMMARIZE, last.summarizing);
+    assert.ok(events.some((e) => e.type === "step.end" && e.output?.lines === 4 && e.output?.names === "Ada, Ben"), JSON.stringify(events).slice(0, 900));
+    c = await listed();
+    assert.deepEqual([c.done, c.lines, c.startedAt, c.endedAt, c.summary], [true, 4, at(0), at(600), undefined]);
+
+    // What the summary's writer is given…
+    const facts = await server("stadeum/canvas/call-facts", { job: CALL });
+    assert.deepEqual([facts.names, facts.length, facts.lines, facts.done], ["Ada, Ben", "about 10 minutes", 4, true]);
+    assert.equal(facts.text.split("\n")[0], "1 [Ada Park] Let's ship the checklist first.");
+    // …and what it wrote, as the workflow's last step keeps it: checked, then shown by the list.
+    await assert.rejects(server("stadeum/canvas/call-summary", { job: CALL, title: " " }), /no title/);
+    await assert.rejects(server("stadeum/canvas/call-summary", { job: JOB, title: "x" }), /not a recorded call/);
+    await server("stadeum/canvas/call-summary", {
+      job: CALL,
+      title: '"Checklist first, then invites"',
+      discussed: ["- Shipping the checklist before invites", " "],
+      decided: ["The checklist ships first"],
+      actions: [{ who: "Ben", items: ["Write the invite emails"] }, { who: "Ada", items: [] }],
+      open: ["None"],
+      facts: facts.facts,
+    });
+    c = await listed();
+    assert.equal(c.title, "Checklist first, then invites");
+    assert.deepEqual(c.summary.discussed, ["Shipping the checklist before invites"]);
+    assert.deepEqual(c.summary.actions, [{ who: "Ben", items: ["Write the invite emails"] }]);
+    assert.deepEqual(c.summary.open, []);
+    assert.deepEqual(c.people.map((p: { name: string }) => p.name), ["Ada Park", "Ben Ortiz"]);
+
+    // The page may start a summary itself (Summarize on a call that has none).
+    const launched = await page("run/launch", { workflow: SUMMARIZE, input: { job: CALL } });
+    assert.match(String(launched.result?.runId), /\S/, JSON.stringify(launched));
+    await ended(SUMMARIZE, launched.result.runId);
+  });
+
+  it("keeps a word corrected in a transcript in the server's vocabulary, the one dictation uses", async () => {
+    // The vocabulary is strut's own (memory/lexicon, dictation/*). Today strut keeps one on a LadybugDB graph only:
+    // on Neo4j the page finds none and shows the transcript as it is, until strut's vocabulary is there too.
+    if (process.env["CANVAS_TEST_NEO4J_URI"]) {
+      assert.match(String((await page("memory/lexicon", {})).error), /Ladybug/);
+      return;
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const heardAs = async (): Promise<any[]> => ((await page("memory/lexicon", {})).result?.entities ?? []).flatMap((e: any) => (e.heard ?? []).map((h: any) => [h.value, h.form ?? e.name]));
+    assert.deepEqual(await heardAs(), []);
+    // What the page's "Correct the transcript" saves: how it was heard, and how it is written.
+    const saved = await page("dictation/add", { heard: "stack work", written: "Stakwork" });
+    assert.equal(saved.error, undefined, JSON.stringify(saved));
+    assert.deepEqual(await heardAs(), [["stack work", "Stakwork"]]);
+    // Undo on the toast takes it back.
+    assert.ok(saved.result.undo.length > 0);
+    assert.equal((await page("dictation/undo", { undo: saved.result.undo })).error, undefined);
+    assert.deepEqual(await heardAs(), []);
+    // The app declares no graph type of its own for it.
+    assert.doesNotMatch(await readFile(join(HERE, "apps/canvas/app.yaml"), "utf8"), /^data:|graph\/create-node/m);
+  });
+
   it("ships its pages", async () => {
-    for (const name of ["Canvas Planning", "Brainstorm", "Brainstorm Method", "Brainstorm Framing", "Call Canvas"]) {
+    for (const name of ["Canvas Planning", "Brainstorm", "Brainstorm Method", "Brainstorm Framing", "Call Canvas", "Call Summary"]) {
       const text = await readFile(join(HERE, "concepts", `${name}.md`), "utf8");
       assert.match(text, new RegExp(`^---\\nname: ${name}\\n`));
       assert.doesNotMatch(text, /\bHive\b|org_id|HiveInitiative|InitiativeFeature/);

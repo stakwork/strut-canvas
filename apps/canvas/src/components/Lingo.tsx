@@ -1,47 +1,55 @@
-// Right-click a word in the transcript to correct it: a small popup (heard, corrected) that, on save, writes a
-// `Lingo` node to the graph (graph/create-node). Corrections apply to every line, now and on later calls.
+// Right-click a word in the transcript to correct it: a small popup (heard, should be) that, on save, adds the pair
+// to this server's vocabulary, the one dictation uses (strut's `dictation/add`: the word, and how it was heard). The
+// corrections are read from the same vocabulary (`memory/lexicon`) and applied to every line, now and on later
+// calls. A server that keeps no vocabulary has none of this: `available` is false and the transcript is plain text.
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useStrutClient } from "@strut/kit";
 import { toast } from "sonner";
-import { applyLingo, toEntry, type LingoEntry } from "../lib/lingo";
+import { applyLingo, toEntries, type LingoEntry } from "../lib/lingo";
 
 const KEY = ["ic", "lingo"];
+interface Vocabulary {
+  available: boolean;
+  entries: LingoEntry[];
+}
+const NONE: Vocabulary = { available: false, entries: [] };
 
-/** Every Lingo node, as entries; `add` writes one (and shows it at once). */
+/** The vocabulary's corrections; `add` saves one (shown at once, with Undo). */
 export function useLingo() {
   const client = useStrutClient();
   const qc = useQueryClient();
   const q = useQuery({
     queryKey: KEY,
-    staleTime: 15_000,
-    queryFn: async (): Promise<LingoEntry[]> => {
-      const r = await client.run("graph/find", { node_type: "Lingo", limit: 500 });
-      if (typeof r === "string") return []; // the type is not on this graph yet: no corrections
-      const nodes = ((r as { nodes?: Array<{ ref_id: string; properties?: Record<string, unknown> }> }).nodes ?? []);
-      return nodes.map(toEntry).filter((e): e is LingoEntry => !!e);
+    staleTime: 60_000,
+    retry: false,
+    queryFn: async (): Promise<Vocabulary> => {
+      try {
+        const r = await client.run("memory/lexicon", {});
+        return typeof r === "string" ? NONE : { available: true, entries: toEntries(r) };
+      } catch {
+        return NONE; // this server keeps no vocabulary
+      }
     },
   });
-  const entries = q.data ?? [];
-  const add = async (e: LingoEntry): Promise<boolean> => {
-    const prev = qc.getQueryData<LingoEntry[]>(KEY) ?? [];
-    qc.setQueryData<LingoEntry[]>(KEY, [...prev.filter((x) => x.heard.toLowerCase() !== e.heard.toLowerCase()), e]);
+  const { available, entries } = q.data ?? NONE;
+  const undo = async (ids: string[]) => {
     try {
-      const r = await client.run("graph/create-node", {
-        node_type: "Lingo",
-        node_data: {
-          name: `${e.heard} → ${e.corrected}`,
-          heard: e.heard,
-          corrected: e.corrected,
-          ...(e.call ? { call: e.call } : {}),
-          ...(e.line !== undefined ? { line: e.line } : {}),
-          ...(e.speaker ? { speaker: e.speaker } : {}),
-          ...(e.context ? { context: e.context } : {}),
-          corrected_at: new Date().toISOString(),
-        },
-      });
-      if (typeof r === "string" && !/warning|exist/i.test(r)) throw new Error(r);
-      toast.success(`Lingo: “${e.heard}” → “${e.corrected}”`);
+      await client.run("dictation/undo", { undo: ids });
+    } catch (err) {
+      toast.error(`Could not undo the correction: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    void qc.invalidateQueries({ queryKey: KEY });
+  };
+  const add = async (e: LingoEntry): Promise<boolean> => {
+    const prev = qc.getQueryData<Vocabulary>(KEY) ?? NONE;
+    qc.setQueryData<Vocabulary>(KEY, { ...prev, entries: [...prev.entries.filter((x) => x.heard.toLowerCase() !== e.heard.toLowerCase()), e] });
+    try {
+      const r = await client.run<{ undo?: unknown } | string>("dictation/add", { written: e.corrected, heard: e.heard });
+      if (typeof r === "string") throw new Error(r);
+      const ids = Array.isArray(r?.undo) ? r.undo.map(String) : [];
+      // Long enough to read and reach Undo: a correction applies to every line of every call.
+      toast.success(`Lingo: “${e.heard}” → “${e.corrected}”`, ids.length ? { duration: 12_000, action: { label: "Undo", onClick: () => void undo(ids) } } : undefined);
       void qc.invalidateQueries({ queryKey: KEY });
       return true;
     } catch (err) {
@@ -50,16 +58,13 @@ export function useLingo() {
       return false;
     }
   };
-  return { entries, add };
+  return { available, entries, add };
 }
 
 export interface Pick {
   x: number;
   y: number;
   heard: string;
-  line: number;
-  speaker: string;
-  context: string;
 }
 
 export function CorrectPopup({ pick, onSave, onClose }: { pick: Pick; onSave: (e: LingoEntry) => Promise<boolean>; onClose: () => void }) {
@@ -89,7 +94,7 @@ export function CorrectPopup({ pick, onSave, onClose }: { pick: Pick; onSave: (e
         e.preventDefault();
         if (!ok || busy) return;
         setBusy(true);
-        const done = await onSave({ heard: heard.trim(), corrected: fixed.trim(), line: pick.line, speaker: pick.speaker, context: pick.context });
+        const done = await onSave({ heard: heard.trim(), corrected: fixed.trim() });
         setBusy(false);
         if (done) onClose();
       }}

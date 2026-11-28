@@ -6,9 +6,9 @@ description: >-
 icon: lightbulb
 entry: src/App.tsx
 grants:
-  # ops: every change a person makes. implement: Implement on a feature.
-  # orchestrator, job, builder: strut/jamie's Thread, compiled in, launches and follows these.
-  workflows: [stadeum/canvas/ops, stadeum/canvas/implement, orchestrator, job, builder]
+  # ops: every change a person makes. implement: Implement on a feature. summarize: Summarize on a recorded
+  # call that has no summary. orchestrator, job, builder: strut/jamie's Thread, compiled in, launches and follows these.
+  workflows: [stadeum/canvas/ops, stadeum/canvas/implement, stadeum/canvas/summarize, orchestrator, job, builder]
   steps:
     # Reads: the plan, its brainstorms and why, the links among them, and the change feed.
     - graph/find
@@ -20,7 +20,7 @@ grants:
     - stadeum/canvas/threads
     # A recorded call's transcript: the lines voice stored, or an older call's rebuilt from the scribe's turns.
     - stadeum/canvas/transcript
-    # The Calls list: every recorded call (call-… job), for replay.
+    # The Calls page: every recorded call (call-… job) with who spoke, how long and its summary.
     - stadeum/canvas/calls
     # Needs you and Working now; pending plan changes drawn in pencil, decided here.
     - job/list
@@ -36,11 +36,10 @@ grants:
     - github/pr-status
     - github/merge-pr
     - secret/add
-    # Lingo: a correction made in the transcript is written as a Lingo node.
-    - graph/create-node
+    # Lingo: a word corrected in the transcript goes into this server's vocabulary, the one dictation uses, and the
+    # transcript is shown with that vocabulary's corrections. Undo takes the last one back.
+    - memory/lexicon
+    - dictation/add
+    - dictation/undo
   sqlite: false
   automations: []
-data:
-  graph:
-    types:
-      Lingo: { name: string, heard: string, corrected: string, call: string?, line: number?, speaker: string?, context: string?, corrected_at: string?, key: [name], search: [name, heard, corrected] }

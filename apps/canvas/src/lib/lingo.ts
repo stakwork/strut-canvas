@@ -1,15 +1,10 @@
-// Lingo: a word the call's transcript got wrong and what it should have said. One `Lingo` graph node per correction
-// (heard → corrected, with the line, speaker and call it was made on). The transcript shows every line with the
-// corrections applied. Pure parts here; the read and write are `useLingo` (../components/Lingo.tsx).
+// Lingo: a word the call's transcript got wrong and what it should have said. The corrections are this server's
+// vocabulary, the one dictation uses (strut's `memory/lexicon`): a word, and each way it was heard. The transcript
+// shows every line with them applied. Pure parts here; the read and write are `useLingo` (../components/Lingo.tsx).
 
 export interface LingoEntry {
-  ref_id?: string;
   heard: string;
   corrected: string;
-  call?: string;
-  line?: number;
-  speaker?: string;
-  context?: string;
 }
 
 /** A piece of a line: plain text, or a word a correction replaced. */
@@ -41,20 +36,19 @@ export function applyLingo(text: string, entries: readonly LingoEntry[]): Piece[
   return out;
 }
 
-/** Whether a Lingo node's properties make an entry. */
-export function toEntry(n: { ref_id: string; properties?: Record<string, unknown> }): LingoEntry | null {
-  const p = n.properties ?? {};
-  const heard = typeof p["heard"] === "string" ? p["heard"] : "";
-  const corrected = typeof p["corrected"] === "string" ? p["corrected"] : "";
-  if (!heard || !corrected) return null;
-  const line = typeof p["line"] === "number" ? p["line"] : Number(p["line"]);
-  return {
-    ref_id: n.ref_id,
-    heard,
-    corrected,
-    ...(typeof p["call"] === "string" ? { call: p["call"] } : {}),
-    ...(Number.isFinite(line) ? { line } : {}),
-    ...(typeof p["speaker"] === "string" ? { speaker: p["speaker"] } : {}),
-    ...(typeof p["context"] === "string" ? { context: p["context"] } : {}),
-  };
+/** The vocabulary as `memory/lexicon` answers it, as corrections: each way a word was heard, and how it is written
+ *  (the form it was heard for, else the word's name). A word turned off for dictation is left out. */
+export function toEntries(lexicon: unknown): LingoEntry[] {
+  const entities = (lexicon as { entities?: unknown } | null)?.entities;
+  const out: LingoEntry[] = [];
+  for (const e of Array.isArray(entities) ? entities : []) {
+    const name = typeof e?.name === "string" ? e.name.trim() : "";
+    if (!name || e.dictation_off === true) continue;
+    for (const h of Array.isArray(e.heard) ? e.heard : []) {
+      const heard = typeof h?.value === "string" ? h.value.trim() : "";
+      const corrected = typeof h?.form === "string" && h.form.trim() ? h.form.trim() : name;
+      if (heard) out.push({ heard, corrected });
+    }
+  }
+  return out;
 }

@@ -9,7 +9,7 @@ import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef,
 import { useChannel } from "@strut/kit";
 import { CorrectPopup, LineText, useLingo, type Pick } from "./Lingo";
 import { cleanWord } from "../lib/lingo";
-import type { CallState, CallJob } from "../lib/call";
+import type { CallState } from "../lib/call";
 import { bubblesOf, colourOf, initials, KIND_WORD, paceOf, simFrames, type CallRef, type Line, type Speaking } from "../lib/transcript";
 
 // ---------------------------------------------------------------- the channel
@@ -265,11 +265,7 @@ export function TranscriptView({
               {b.lines.map((l) => (
                 <p key={l.n} data-n={l.n} className={marked === l.n ? "tv-marked" : ""}>
                   <small className="tv-n">{l.n}</small>
-                  <LineText
-                    text={l.text}
-                    entries={lingo.entries}
-                    onPick={(heard, ev) => setPick({ x: ev.clientX, y: ev.clientY, heard: cleanWord(heard) || heard, line: l.n, speaker: b.speaker, context: l.text })}
-                  />
+                  {lingo.available ? <LineText text={l.text} entries={lingo.entries} onPick={(heard, ev) => setPick({ x: ev.clientX, y: ev.clientY, heard: cleanWord(heard) || heard })} /> : l.text}
                   {(cited.get(l.n) ?? []).map((r) => (
                     <button key={`${r.id}${r.kind}`} type="button" className="tv-cite" title={r.title} onClick={() => onOpenCard(r)}>
                       → {KIND_WORD[r.kind]}: {r.title.length > 42 ? `${r.title.slice(0, 42)}…` : r.title}
@@ -299,13 +295,7 @@ export function TranscriptView({
         </div>
       </div>
 
-      {pick && (
-        <CorrectPopup
-          pick={pick}
-          onClose={() => setPick(null)}
-          onSave={(e) => lingo.add({ ...e, call: job })}
-        />
-      )}
+      {pick && <CorrectPopup pick={pick} onClose={() => setPick(null)} onSave={lingo.add} />}
       <footer className="tv-foot">
         {!following && (
           <button type="button" className="sb-btn tv-live" onClick={() => setFollowing(true)}>
@@ -343,26 +333,6 @@ export function TranscriptView({
           </span>
         )}
       </footer>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------- the calls list
-
-export function CallsMenu({ calls, loading, current, onPick }: { calls: CallJob[] | undefined; loading: boolean; current: string | null; onPick: (job: string) => void }) {
-  return (
-    <div className="sb-menu cv-calls" role="menu">
-      <h4>Recorded calls{calls ? ` · ${calls.length}` : ""}</h4>
-      {loading && <small className="sb-hint">Reading the calls…</small>}
-      {calls && !calls.length && <small className="sb-hint">No call has been recorded on the canvas yet.</small>}
-      {calls?.map((c) => (
-        <button key={c.job} type="button" role="menuitem" className={c.job === current ? "ic-active" : ""} onClick={() => onPick(c.job)}>
-          <span>
-            {c.busy && <i className="tv-live-dot" />} {c.title}
-          </span>
-          <b>{c.at ? new Date(c.at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : c.job}</b>
-        </button>
-      ))}
     </div>
   );
 }
