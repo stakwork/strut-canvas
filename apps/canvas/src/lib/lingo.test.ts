@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { applyLingo, cleanWord, toEntries } from "./lingo";
+import { applyLingo, cleanWord, listed, toEntries } from "./lingo";
 
 describe("lingo: the vocabulary's corrections on a transcript line", () => {
   it("reads the vocabulary as corrections: each way a word was heard, written as its form or its name", () => {
@@ -16,11 +16,14 @@ describe("lingo: the vocabulary's corrections on a transcript line", () => {
       ],
       undone: [],
     };
+    // Each keeps its mishearing's id, which is what Remove takes back.
     assert.deepEqual(toEntries(lexicon), [
-      { heard: "stack work", corrected: "Stakwork" },
-      { heard: "Stackwork", corrected: "Stakwork" },
-      { heard: "bee tee see", corrected: "BTC" },
+      { heard: "stack work", corrected: "Stakwork", id: "m1" },
+      { heard: "Stackwork", corrected: "Stakwork", id: "m2" },
+      { heard: "bee tee see", corrected: "BTC", id: "m3" },
     ]);
+    assert.deepEqual(toEntries({ entities: [{ name: "Peel", heard: [{ value: "peal" }] }] }), [{ heard: "peal", corrected: "Peel" }]);
+    assert.deepEqual(listed(toEntries(lexicon)).map((e) => `${e.heard}>${e.corrected}`), ["bee tee see>BTC", "stack work>Stakwork", "Stackwork>Stakwork"]);
     assert.deepEqual(toEntries(null), []);
     assert.deepEqual(toEntries({ entities: "none" }), []);
   });

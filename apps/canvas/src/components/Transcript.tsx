@@ -7,7 +7,7 @@
 // scroll it, or Play it at the call's pace.
 import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { useChannel } from "@strut/kit";
-import { CorrectPopup, LineText, useLingo, type Pick } from "./Lingo";
+import { CorrectionNote, CorrectPopup, LineText, useLingo, type Pick, type Shown } from "./Lingo";
 import { cleanWord } from "../lib/lingo";
 import type { CallState } from "../lib/call";
 import { bubblesOf, colourOf, initials, KIND_WORD, paceOf, simFrames, type CallRef, type Line, type Speaking } from "../lib/transcript";
@@ -122,6 +122,7 @@ export function TranscriptView({
   const stream = useRef<HTMLDivElement>(null);
   const lingo = useLingo();
   const [pick, setPick] = useState<Pick | null>(null);
+  const [note, setNote] = useState<Shown | null>(null);
   const [playing, setPlaying] = useState(false);
   const [cursor, setCursor] = useState<number | null>(null);
   const [speed, setSpeed] = useState(1);
@@ -265,7 +266,16 @@ export function TranscriptView({
               {b.lines.map((l) => (
                 <p key={l.n} data-n={l.n} className={marked === l.n ? "tv-marked" : ""}>
                   <small className="tv-n">{l.n}</small>
-                  {lingo.available ? <LineText text={l.text} entries={lingo.entries} onPick={(heard, ev) => setPick({ x: ev.clientX, y: ev.clientY, heard: cleanWord(heard) || heard })} /> : l.text}
+                  {lingo.available ? (
+                    <LineText
+                      text={l.text}
+                      entries={lingo.entries}
+                      onPick={(heard, ev) => (setNote(null), setPick({ x: ev.clientX, y: ev.clientY, heard: cleanWord(heard) || heard }))}
+                      onShow={(entry, heard, ev) => (setPick(null), setNote({ x: ev.clientX, y: ev.clientY, entry, heard }))}
+                    />
+                  ) : (
+                    l.text
+                  )}
                   {(cited.get(l.n) ?? []).map((r) => (
                     <button key={`${r.id}${r.kind}`} type="button" className="tv-cite" title={r.title} onClick={() => onOpenCard(r)}>
                       → {KIND_WORD[r.kind]}: {r.title.length > 42 ? `${r.title.slice(0, 42)}…` : r.title}
@@ -296,6 +306,7 @@ export function TranscriptView({
       </div>
 
       {pick && <CorrectPopup pick={pick} onClose={() => setPick(null)} onSave={lingo.add} />}
+      {note && <CorrectionNote shown={note} onClose={() => setNote(null)} onRemove={lingo.remove} />}
       <footer className="tv-foot">
         {!following && (
           <button type="button" className="sb-btn tv-live" onClick={() => setFollowing(true)}>

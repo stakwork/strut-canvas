@@ -62,7 +62,9 @@ server's vocabulary, the one strut's dictation uses (`dictation/add`: the
 word, and how it was heard), and every line of every call is shown with
 that vocabulary's corrections (`memory/lexicon`), each marked and showing
 what was heard. Undo on the toast takes the last one back
-(`dictation/undo`). The app keeps no type of its own for this. On a
+(`dictation/undo`). Click a corrected word to see what was heard and to
+remove the correction (`dictation/remove`); the Calls page lists every
+one of them under its calls, each with Remove. The app keeps no type of its own for this. On a
 server whose strut keeps no vocabulary the transcript is plain text and
 there is nothing to right-click.
 

@@ -1,11 +1,13 @@
 // The Calls page: every recorded call, newest first, and beside the list the
 // one picked: its title, when and how long, who spoke, and its summary
 // (discussed, decided, action items, open questions), with the transcript one
-// click away. A call that stopped without a summary offers Summarize; one
+// click away. Under the list, the lingo: every word corrected in a transcript,
+// with Remove. A call that stopped without a summary offers Summarize; one
 // still recording says so. On a narrow page the list and the call take turns.
 import { useEffect, useState } from "react";
 import { lengthOf, namesOf, sectionsOf, type Recording } from "../lib/recordings";
 import { Avatar } from "./Transcript";
+import { LingoList } from "./Lingo";
 
 const when = (at: number) => (at ? new Date(at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "");
 
@@ -63,6 +65,7 @@ export function CallsPage({
             </button>
           );
         })}
+        <LingoList />
       </nav>
       <section className="cp-call" aria-label="The call">
         {shown && <Call key={shown.job} call={shown} summarizing={summarizing} onOpen={onOpen} onBack={() => setPicked(null)} />}

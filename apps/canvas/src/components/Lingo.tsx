@@ -1,12 +1,14 @@
 // Right-click a word in the transcript to correct it: a small popup (heard, should be) that, on save, adds the pair
 // to this server's vocabulary, the one dictation uses (strut's `dictation/add`: the word, and how it was heard). The
 // corrections are read from the same vocabulary (`memory/lexicon`) and applied to every line, now and on later
-// calls. A server that keeps no vocabulary has none of this: `available` is false and the transcript is plain text.
+// calls. Click a corrected word to see what was heard, and to remove the correction (`dictation/remove`); the Calls
+// page lists them all (<LingoList>). A server that keeps no vocabulary has none of this: `available` is false and
+// the transcript is plain text.
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useStrutClient } from "@strut/kit";
 import { toast } from "sonner";
-import { applyLingo, toEntries, type LingoEntry } from "../lib/lingo";
+import { applyLingo, listed, toEntries, type LingoEntry } from "../lib/lingo";
 
 const KEY = ["ic", "lingo"];
 interface Vocabulary {
@@ -15,7 +17,7 @@ interface Vocabulary {
 }
 const NONE: Vocabulary = { available: false, entries: [] };
 
-/** The vocabulary's corrections; `add` saves one (shown at once, with Undo). */
+/** The vocabulary's corrections; `add` saves one (shown at once, with Undo), `remove` takes one out (with Undo). */
 export function useLingo() {
   const client = useStrutClient();
   const qc = useQueryClient();
@@ -58,7 +60,23 @@ export function useLingo() {
       return false;
     }
   };
-  return { available, entries, add };
+  const remove = async (e: LingoEntry): Promise<boolean> => {
+    if (!e.id) return false;
+    const prev = qc.getQueryData<Vocabulary>(KEY) ?? NONE;
+    qc.setQueryData<Vocabulary>(KEY, { ...prev, entries: prev.entries.filter((x) => x.id !== e.id) });
+    try {
+      const r = await client.run("dictation/remove", { ref_id: e.id });
+      if (typeof r === "string") throw new Error(r);
+      toast.success(`Removed: “${e.heard}” → “${e.corrected}”`, { duration: 12_000, action: { label: "Undo", onClick: () => void add({ heard: e.heard, corrected: e.corrected }) } });
+      void qc.invalidateQueries({ queryKey: KEY });
+      return true;
+    } catch (err) {
+      qc.setQueryData(KEY, prev);
+      toast.error(`Could not remove the correction: ${err instanceof Error ? err.message : String(err)}`);
+      return false;
+    }
+  };
+  return { available, entries, add, remove };
 }
 
 export interface Pick {
@@ -120,8 +138,92 @@ export function CorrectPopup({ pick, onSave, onClose }: { pick: Pick; onSave: (e
   );
 }
 
-/** A line's text with the corrections applied; right-click anywhere in it to correct the word (or the selection) there. */
-export function LineText({ text, entries, onPick }: { text: string; entries: readonly LingoEntry[]; onPick: (heard: string, e: { clientX: number; clientY: number }) => void }) {
+/** A corrected word someone clicked: where, the correction, and the words as they were heard on that line. */
+export interface Shown {
+  x: number;
+  y: number;
+  entry: LingoEntry;
+  heard: string;
+}
+
+/** What a corrected word was heard as, with Remove. */
+export function CorrectionNote({ shown, onRemove, onClose }: { shown: Shown; onRemove: (e: LingoEntry) => Promise<boolean>; onClose: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const k = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    const d = (e: PointerEvent) => !ref.current?.contains(e.target as Node) && onClose();
+    window.addEventListener("keydown", k);
+    window.addEventListener("pointerdown", d);
+    return () => (window.removeEventListener("keydown", k), window.removeEventListener("pointerdown", d));
+  }, []);
+  const left = Math.max(8, Math.min(shown.x, window.innerWidth - 300));
+  const top = Math.max(8, Math.min(shown.y + 14, window.innerHeight - 150));
+  return (
+    <div ref={ref} className="lg-pop lg-note" style={{ left, top }} role="dialog" aria-label="Lingo" data-testid="lingo-note">
+      <h4>{shown.entry.corrected}</h4>
+      <span className="lg-was">Heard “{shown.heard}”</span>
+      <div className="lg-row">
+        <button type="button" className="sb-btn" onClick={onClose}>
+          Close
+        </button>
+        <button
+          type="button"
+          className="sb-btn"
+          disabled={!shown.entry.id || busy}
+          onClick={async () => {
+            setBusy(true);
+            const done = await onRemove(shown.entry);
+            setBusy(false);
+            if (done) onClose();
+          }}
+        >
+          {busy ? "Removing…" : "Remove"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** Every correction, by word, each with Remove: the Calls page's list. Nothing on a server with no vocabulary. */
+export function LingoList() {
+  const lingo = useLingo();
+  if (!lingo.available) return null;
+  const all = listed(lingo.entries);
+  return (
+    <section className="lg-list" aria-label="Lingo" data-testid="lingo-list">
+      <h3>Lingo{all.length ? ` · ${all.length}` : ""}</h3>
+      {!all.length && <p className="lg-none">No words yet.</p>}
+      <ul>
+        {all.map((e) => (
+          <li key={e.id ?? `${e.heard}>${e.corrected}`}>
+            <span>
+              <b>{e.corrected}</b>
+              <small>heard “{e.heard}”</small>
+            </span>
+            <button type="button" className="sb-btn sb-quietbtn" disabled={!e.id} onClick={() => void lingo.remove(e)}>
+              Remove
+            </button>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+/** A line's text with the corrections applied; right-click anywhere in it to correct the word (or the selection)
+ *  there, click a corrected word to see what was heard. */
+export function LineText({
+  text,
+  entries,
+  onPick,
+  onShow,
+}: {
+  text: string;
+  entries: readonly LingoEntry[];
+  onPick: (heard: string, e: { clientX: number; clientY: number }) => void;
+  onShow: (entry: LingoEntry, heard: string, e: { clientX: number; clientY: number }) => void;
+}) {
   const pieces = useMemo(() => applyLingo(text, entries), [text, entries]);
   const words = (s: string, base: number) =>
     s.split(/(\s+)/).map((w, i) =>
@@ -147,7 +249,21 @@ export function LineText({ text, entries, onPick }: { text: string; entries: rea
     >
       {pieces.map((p, i) =>
         p.fixed ? (
-          <span key={i} className="lg-fixed" data-fixed={p.heard} title={`Heard “${p.heard}” — corrected (Lingo)`}>
+          <span
+            key={i}
+            className="lg-fixed"
+            data-fixed={p.heard}
+            role="button"
+            tabIndex={0}
+            title={`Heard “${p.heard}”`}
+            onClick={(e) => (e.stopPropagation(), onShow(p.fixed!, p.heard ?? p.fixed!.heard, e))}
+            onKeyDown={(e) => {
+              if (e.key !== "Enter" && e.key !== " ") return;
+              e.preventDefault();
+              const r = e.currentTarget.getBoundingClientRect();
+              onShow(p.fixed!, p.heard ?? p.fixed!.heard, { clientX: r.left, clientY: r.bottom });
+            }}
+          >
             {p.text}
             <sup className="lg-mark" aria-label={`Corrected by lingo, heard “${p.heard}”`}>
               ✦

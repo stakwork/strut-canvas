@@ -475,6 +475,14 @@ describe("stadeum/canvas", () => {
     assert.match(events, /We run it on Stakwork, at the stadium\./);
     // The stored transcript is as it was heard: the page shows it with the corrections marked.
     assert.match(JSON.stringify((await page("stadeum/canvas/transcript", { job: "call-rec1" })).result.lines), /stack work/);
+
+    // Remove, on a corrected word or in the Calls page's list: the mishearing by its id, and its word with it.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const taught = ((await page("memory/lexicon", {})).result.entities as any[]).flatMap((e) => e.heard as { ref_id: string; value: string }[]);
+    assert.deepEqual(taught.map((h) => h.value), ["stack work"]);
+    assert.equal((await page("dictation/remove", { ref_id: taught[0]!.ref_id })).error, undefined);
+    assert.deepEqual(await heardAs(), []);
+    assert.deepEqual((await server("stadeum/canvas/call-facts", { job: "call-rec1" })).words, []);
   });
 
   it("ships its pages", async () => {

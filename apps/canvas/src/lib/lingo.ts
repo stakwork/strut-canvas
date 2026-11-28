@@ -5,6 +5,8 @@
 export interface LingoEntry {
   heard: string;
   corrected: string;
+  /** The mishearing's id in the vocabulary (absent on one just saved, until it is read back): what Remove takes. */
+  id?: string;
 }
 
 /** A piece of a line: plain text, or a word a correction replaced. */
@@ -36,6 +38,11 @@ export function applyLingo(text: string, entries: readonly LingoEntry[]): Piece[
   return out;
 }
 
+/** The corrections as a list reads them: by the word, then by how it was heard. */
+export function listed(entries: readonly LingoEntry[]): LingoEntry[] {
+  return [...entries].sort((a, b) => a.corrected.localeCompare(b.corrected, undefined, { sensitivity: "base" }) || a.heard.localeCompare(b.heard, undefined, { sensitivity: "base" }));
+}
+
 /** The vocabulary as `memory/lexicon` answers it, as corrections: each way a word was heard, and how it is written
  *  (the form it was heard for, else the word's name). A word turned off for dictation is left out. */
 export function toEntries(lexicon: unknown): LingoEntry[] {
@@ -47,7 +54,7 @@ export function toEntries(lexicon: unknown): LingoEntry[] {
     for (const h of Array.isArray(e.heard) ? e.heard : []) {
       const heard = typeof h?.value === "string" ? h.value.trim() : "";
       const corrected = typeof h?.form === "string" && h.form.trim() ? h.form.trim() : name;
-      if (heard) out.push({ heard, corrected });
+      if (heard) out.push({ heard, corrected, ...(typeof h?.ref_id === "string" && h.ref_id ? { id: h.ref_id } : {}) });
     }
   }
   return out;
