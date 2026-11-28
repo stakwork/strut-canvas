@@ -7,7 +7,9 @@ name: promote
 #
 #   gh workflow run promote.yml -R stakwork/strut-canvas -f commit=<sha>
 #
-# The first run makes `stable`.
+# `stable` was first made by hand on 2026-11-28: GitHub had never registered this
+# workflow (its file came in the repository's first push and was not read until
+# a later commit touched it).
 
 on:
   workflow_dispatch:
