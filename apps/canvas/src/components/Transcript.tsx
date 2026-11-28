@@ -7,7 +7,7 @@
 // scroll it, or Play it at the call's pace.
 import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { useChannel } from "@strut/kit";
-import type { CallState, CallJob } from "../lib/call";
+import type { CallState } from "../lib/call";
 import { bubblesOf, colourOf, initials, KIND_WORD, paceOf, simFrames, type CallRef, type Line, type Speaking } from "../lib/transcript";
 
 // ---------------------------------------------------------------- the channel
@@ -328,26 +328,6 @@ export function TranscriptView({
           </span>
         )}
       </footer>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------- the calls list
-
-export function CallsMenu({ calls, loading, current, onPick }: { calls: CallJob[] | undefined; loading: boolean; current: string | null; onPick: (job: string) => void }) {
-  return (
-    <div className="sb-menu cv-calls" role="menu">
-      <h4>Recorded calls{calls ? ` · ${calls.length}` : ""}</h4>
-      {loading && <small className="sb-hint">Reading the calls…</small>}
-      {calls && !calls.length && <small className="sb-hint">No call has been recorded on the canvas yet.</small>}
-      {calls?.map((c) => (
-        <button key={c.job} type="button" role="menuitem" className={c.job === current ? "ic-active" : ""} onClick={() => onPick(c.job)}>
-          <span>
-            {c.busy && <i className="tv-live-dot" />} {c.title}
-          </span>
-          <b>{c.at ? new Date(c.at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : c.job}</b>
-        </button>
-      ))}
     </div>
   );
 }

@@ -4,9 +4,11 @@
 // channel itself is joined by <ChannelTap> (components/Transcript.tsx), which
 // hands each frame to `ingest`.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useStrutClient } from "@strut/kit";
 import { bodyOf, mergeLines, speakingIn, speakingNow, toSpeaking, type Line, type Speaking } from "./transcript";
+import { toRecordings, unsettled, type Recording } from "./recordings";
+import { runToEnd } from "./read";
 
 export interface CallState {
   lines: Line[];
@@ -146,27 +148,46 @@ export function useCall(job: string | null): CallState {
   };
 }
 
-export interface CallJob {
-  job: string;
-  title: string;
-  at: number;
-  busy: boolean;
-}
+const CALLS_KEY = ["ic", "calls"] as const;
+/** How often the list is read again while a call on it records, or just stopped and waits for its summary. */
+const POLL_CALLS_MS = 8_000;
 
-/** The recorded calls here: every `call-…` job, newest first (`stadeum/canvas/calls`: a page's own job/list sees only
- *  the app's jobs). */
+/** The recorded calls here: every `call-…` job, newest first, each with who spoke, how long and its summary
+ *  (`stadeum/canvas/calls`: a page's own job/list sees only the app's jobs). */
 export function useCalls(enabled: boolean) {
   const client = useStrutClient();
   return useQuery({
-    queryKey: ["ic", "calls"],
+    queryKey: CALLS_KEY,
     enabled,
     staleTime: 30_000,
-    queryFn: async (): Promise<CallJob[]> => {
-      const r = await client.run<{ calls?: Array<{ job: string; title?: string; usedAt?: string; createdAt?: string; busy?: unknown }> }>("stadeum/canvas/calls", { limit: 100 });
-      return (r.calls ?? [])
-        .filter((j) => j.job.startsWith("call-"))
-        .map((j) => ({ job: j.job, title: j.title?.trim() || "A call", at: Date.parse(j.createdAt ?? j.usedAt ?? "") || 0, busy: !!j.busy }))
-        .sort((a, b) => b.at - a.at);
-    },
+    refetchInterval: (q) => (q.state.data?.some((c) => unsettled(c, Date.now())) ? POLL_CALLS_MS : false),
+    queryFn: async (): Promise<Recording[]> => toRecordings((await client.run<{ calls?: unknown[] }>("stadeum/canvas/calls", { limit: 100 })).calls),
   });
+}
+
+/** Summarize on a call that has no summary: the `summarize` workflow, as the viewer, followed to its end. `busy`
+ *  holds the calls being summarized; `failed` what to say of a call whose last try wrote none. */
+export function useSummarize() {
+  const client = useStrutClient();
+  const qc = useQueryClient();
+  const [busy, setBusy] = useState<ReadonlySet<string>>(new Set());
+  const [failed, setFailed] = useState<ReadonlyMap<string, string>>(new Map());
+  const run = useCallback(
+    async (job: string) => {
+      setBusy((b) => new Set(b).add(job));
+      setFailed((f) => new Map([...f].filter(([k]) => k !== job)));
+      try {
+        // The key is the one the server launches under when a recording stops: a summary on its way is joined, not doubled.
+        const out = await runToEnd(client, "stadeum/canvas/summarize", { job }, `call-summary:${job}`);
+        if (out["summarized"] === false) setFailed((f) => new Map(f).set(job, "Nothing was said on this call."));
+        await qc.invalidateQueries({ queryKey: CALLS_KEY });
+      } catch (e) {
+        setFailed((f) => new Map(f).set(job, `The summary could not be written: ${e instanceof Error ? e.message : String(e)}`));
+      } finally {
+        setBusy((b) => new Set([...b].filter((k) => k !== job)));
+      }
+    },
+    [client, qc],
+  );
+  return { busy, failed, run };
 }
